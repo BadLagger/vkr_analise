@@ -206,6 +206,173 @@ class DataAnalyzer:
                     'range': df[col].max() - df[col].min()
                 }
     
+    def get_pca_with_correlations(self, variance_threshold=0.90, n_components=None):
+        """
+        Выполняет PCA, возвращает датафрейм с исходными параметрами и компонентами,
+        а также матрицу корреляций компонент с исходными признаками.
+        
+        Параметры:
+        -----------
+        variance_threshold : float
+            Доля объясненной дисперсии (по умолчанию 0.90 = 90%)
+        n_components : int or None
+            Явное число компонент (если None - определяется по threshold)
+        
+        Возвращает:
+        -----------
+        dict: {
+            'df_with_pca': pd.DataFrame - исходные данные + компоненты,
+            'correlations': pd.DataFrame - корреляции компонент с признаками,
+            'high_correlations': dict - для каждой компоненты топ-5 признаков,
+            'pca': PCA object,
+            'explained_variance': array,
+            'n_components': int
+        }
+        """
+        # Получаем чистые нормализованные данные
+        data = self.get_clean_normalized_dataframe()
+        
+        if len(data) == 0:
+            print("Нет данных для PCA")
+            return None
+        
+        # Копируем исходные данные (ненормализованные, для интерпретации)
+        df_original_features = self.df_original[self.numerical_cols].copy()
+        
+        # Масштабируем для PCA
+        scaler = StandardScaler()
+        data_scaled = scaler.fit_transform(data)
+        
+        # Определяем число компонент
+        pca_temp = PCA(n_components=n_components)
+        pca_temp.fit(data_scaled)
+        
+        if n_components is None:
+            cumsum = np.cumsum(pca_temp.explained_variance_ratio_)
+            n_components = np.argmax(cumsum >= variance_threshold) + 1
+            print(f"Для объяснения {variance_threshold*100:.0f}% дисперсии нужно {n_components} компонент")
+        
+        # Выполняем PCA с выбранным числом компонент
+        pca = PCA(n_components=n_components)
+        scores = pca.fit_transform(data_scaled)
+        
+        # Создаем датафрейм с PCA компонентами
+        pca_columns = [f'PC{i+1}' for i in range(n_components)]
+        df_pca = pd.DataFrame(scores, columns=pca_columns, index=data.index)
+        
+        # Добавляем исходные параметры (в исходном масштабе, для интерпретации)
+        df_with_pca = df_original_features.copy()
+        df_with_pca = pd.concat([df_with_pca, df_pca], axis=1)
+        
+        # Вычисляем корреляции PCA компонент с исходными признаками
+        correlations = pd.DataFrame(index=data.columns, columns=pca_columns)
+        for col in data.columns:
+            for i, pc in enumerate(pca_columns):
+                correlations.loc[col, pc] = np.corrcoef(data[col], scores[:, i])[0, 1]
+        
+        correlations = correlations.astype(float)
+        
+        # Для каждой компоненты находим топ-5 коррелирующих признаков
+        high_correlations = {}
+        for pc in pca_columns:
+            # Берем абсолютные значения корреляций
+            abs_corr = correlations[pc].abs().sort_values(ascending=False)
+            top_5 = abs_corr.head(5)
+            high_correlations[pc] = {
+                'features': top_5.index.tolist(),
+                'correlations': correlations.loc[top_5.index, pc].tolist(),
+                'abs_correlations': top_5.values.tolist()
+            }
+        
+        # Выводим информацию
+        print("\n" + "="*60)
+        print("РЕЗУЛЬТАТЫ PCA С ИНТЕРПРЕТАЦИЕЙ")
+        print("="*60)
+        
+        print(f"\nОбъясненная дисперсия по компонентам:")
+        for i, ev in enumerate(pca.explained_variance_ratio_):
+            print(f"  PC{i+1}: {ev*100:.2f}% (накоплено: {np.sum(pca.explained_variance_ratio_[:i+1])*100:.2f}%)")
+        
+        print(f"\nСуммарная объясненная дисперсия: {np.sum(pca.explained_variance_ratio_)*100:.2f}%")
+        
+        print("\n" + "-"*60)
+        print("ИНТЕРПРЕТАЦИЯ КОМПОНЕНТ (топ-5 коррелирующих признаков):")
+        print("-"*60)
+        
+        for pc in pca_columns:
+            print(f"\n{pc} (доля дисперсии: {pca.explained_variance_ratio_[int(pc[2:])-1]*100:.2f}%):")
+            for feat, corr, abs_corr in zip(high_correlations[pc]['features'],
+                                            high_correlations[pc]['correlations'],
+                                            high_correlations[pc]['abs_correlations']):
+                sign = "+" if corr > 0 else "-"
+                print(f"    {sign} {feat}: {abs_corr:.4f} (r = {corr:.4f})")
+        
+        # Визуализация
+        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # График объясненной дисперсии
+        axes[0].bar(range(1, n_components+1), pca.explained_variance_ratio_, alpha=0.6, label='Individual')
+        axes[0].step(range(1, n_components+1), np.cumsum(pca.explained_variance_ratio_), 
+                    where='mid', label='Cumulative', linewidth=2, color='red')
+        axes[0].axhline(y=variance_threshold, color='green', linestyle='--', label=f'{variance_threshold*100:.0f}% threshold')
+        axes[0].set_xlabel('Principal Components')
+        axes[0].set_ylabel('Explained Variance Ratio')
+        axes[0].set_title('PCA: Explained Variance')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+        
+        # Тепловая карта корреляций
+        sns.heatmap(correlations, annot=True, cmap='RdBu_r', center=0, 
+                    fmt='.2f', ax=axes[1], cbar_kws={'label': 'Correlation'})
+        axes[1].set_title(f'Correlations: Original Features vs PCA Components\n(captures {np.sum(pca.explained_variance_ratio_)*100:.1f}% of variance)')
+        axes[1].set_ylabel('Original Features')
+        axes[1].set_xlabel('Principal Components')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Дополнительный график: топ-признаки для каждой компоненты
+        self._plot_top_features_for_pcs(correlations, pca.explained_variance_ratio_, pca_columns)
+        
+        return {
+            'df_with_pca': df_with_pca,
+            'correlations': correlations,
+            'high_correlations': high_correlations,
+            'pca': pca,
+            'scaler': scaler,
+            'explained_variance': pca.explained_variance_ratio_,
+            'n_components': n_components,
+            'scores': scores
+        }
+
+    def _plot_top_features_for_pcs(self, correlations, explained_variance, pca_columns, top_n=8):
+        """Вспомогательный метод: горизонтальные барчарты топ-признаков для каждой PC"""
+        n_pcs = len(pca_columns)
+        fig, axes = plt.subplots(1, n_pcs, figsize=(5*n_pcs, 6))
+        
+        if n_pcs == 1:
+            axes = [axes]
+        
+        for i, pc in enumerate(pca_columns):
+            # Сортируем по абсолютной корреляции
+            sorted_corr = correlations[pc].abs().sort_values(ascending=False).head(top_n)
+            top_features = sorted_corr.index
+            top_corrs = correlations.loc[top_features, pc]
+            
+            # Отрисовка
+            colors = ['red' if c < 0 else 'green' for c in top_corrs]
+            axes[i].barh(range(len(top_features)), top_corrs.values, color=colors, alpha=0.7)
+            axes[i].set_yticks(range(len(top_features)))
+            axes[i].set_yticklabels(top_features)
+            axes[i].axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+            axes[i].set_xlabel('Correlation')
+            axes[i].set_title(f'{pc}\n({explained_variance[i]*100:.1f}% variance)')
+            axes[i].grid(True, alpha=0.3, axis='x')
+        
+        plt.suptitle(f'Top-{top_n} Features Correlated with Each Principal Component', fontsize=14)
+        plt.tight_layout()
+        plt.show()
+    
     def print_data_scale_info(self):
         """Вывод информации о масштабах данных"""
         print("\n=== Информация о масштабах данных ===")
@@ -784,7 +951,7 @@ if __name__ == "__main__":
     
     import glob
 
-    files = glob.glob("/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_*.csv")
+    files = glob.glob("G:/Yadisk/YandexDisk/Учёба/ВКР/vkr_log/metrics_*.csv")
     df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
 
     print("=== Исходные данные ===")
@@ -841,10 +1008,10 @@ if __name__ == "__main__":
     analyzer.diagnose_data_quality()
     
     # PCA
-    pca_result = analyzer.perform_pca(n_components=4)
+    pca_result = analyzer.perform_pca(n_components=8)
     
     # Факторный анализ
-    fa_result = analyzer.perform_factor_analysis(n_factors=3)
+    fa_result = analyzer.perform_factor_analysis(n_factors=5)
     if fa_result is None:
         print("Факторный анализ не удался. Возможные решения:")
         print("1. Проверьте корреляционную матрицу")
@@ -863,5 +1030,89 @@ if __name__ == "__main__":
         cca_result = analyzer.perform_cca(temp_cols, electrical_cols, n_components=1)
     
     # Выделение значимых параметров
-    important_pca = analyzer.extract_important_features(method='pca', n_components=3, threshold=0.4)
-    print(f"\n=== Значимые параметры (PCA, threshold=0.5): {important_pca}")
+    important_pca = analyzer.extract_important_features(method='pca', n_components=3, threshold=0.46)
+    print(f"\n=== Значимые параметры (PCA, threshold=0.45): {important_pca}")
+
+    # ============================================
+    # PCA с интерпретацией через корреляции
+    # ============================================
+    print("\n" + "="*60)
+    print("PCA анализ с интерпретацией компонент")
+    print("="*60)
+
+    # Получаем PCA компоненты и их корреляции с исходными признаками
+    pca_interpretation = analyzer.get_pca_with_correlations(variance_threshold=0.95)
+
+    if pca_interpretation is not None:
+        # Доступ к датафрейму с PCA компонентами
+        df_with_pca = pca_interpretation['df_with_pca']
+        print(f"\nДатафрейм с исходными параметрами и PCA компонентами:")
+        print(df_with_pca.head())
+        
+        # Сохраняем для дальнейшего использования
+        # df_with_pca.to_csv('data_with_pca_components.csv', index=False)
+        
+        # Доступ к корреляциям
+        correlations = pca_interpretation['correlations']
+        print(f"\nМатрица корреляций компонент с признаками:")
+        print(correlations.round(3))
+        
+        # Доступ к интерпретации (для каждой PC - какие признаки важны)
+        high_corrs = pca_interpretation['high_correlations']
+        print(f"\nДетальная интерпретация:")
+        for pc, info in high_corrs.items():
+            print(f"\n{pc}:")
+            for feat, corr in zip(info['features'], info['correlations']):
+                print(f"    {feat}: {corr:.3f}")
+        
+        # ============================================
+        # Теперь можно строить модель на основе интерпретированных факторов
+        # ============================================
+        print("\n" + "="*60)
+        print("ФОРМИРОВАНИЕ ФАКТОРОВ ДЛЯ МОДЕЛИ")
+        print("="*60)
+        
+        # На основе анализа корреляций определяем скрытые факторы
+        factors_for_model = {}
+        
+        for pc, info in high_corrs.items():
+            # Берем признаки с корреляцией > 0.5 или топ-3
+            strong_features = []
+            for feat, corr in zip(info['features'], info['correlations']):
+                if abs(corr) > 0.5:
+                    strong_features.append(feat)
+            
+            # Даем интерпретируемое имя фактору
+            if 'temp' in ' '.join(strong_features).lower():
+                factor_name = f"Factor_Temperature_{pc}"
+            elif 'current' in ' '.join(strong_features).lower():
+                factor_name = f"Factor_Power_{pc}"
+            elif 'voltage' in ' '.join(strong_features).lower():
+                factor_name = f"Factor_Voltage_{pc}"
+            else:
+                factor_name = f"Factor_{pc}"
+            
+            factors_for_model[factor_name] = {
+                'pc_column': pc,
+                'features': strong_features,
+                'correlations': [info['correlations'][i] for i in range(len(strong_features))]
+            }
+            
+            print(f"\n{factor_name}:")
+            print(f"  Состав: {strong_features}")
+            print(f"  Корреляции: {[round(c, 3) for c in factors_for_model[factor_name]['correlations']]}")
+        
+        # Теперь df_with_pca содержит PC1, PC2, PC3, PC4, которые можно использовать
+        # как признаки в любой модели (регрессия, классификация, кластеризация)
+        
+        # Пример: подготовка данных для модели
+        feature_columns = [f'PC{i+1}' for i in range(pca_interpretation['n_components'])]
+        X_for_model = df_with_pca[feature_columns]  # Факторы для модели
+        
+        # Если у вас есть целевая переменная (target), то:
+        # y_target = df_with_pca['some_target_column']
+        # И дальше строить модель: model.fit(X_for_model, y_target)
+        
+        print(f"\nГотово! Получено {len(feature_columns)} факторов для моделирования:")
+        print(f"  Факторы: {feature_columns}")
+        print(f"  Размер матрицы признаков: {X_for_model.shape}")
