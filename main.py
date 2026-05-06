@@ -144,15 +144,17 @@ class DataPreparation:
         return df_clean
     
     @staticmethod
-    def encode_categorical(df, method='onehot'):
+    def encode_categorical(df, method='onehot', encoded_cols=None):
         """
         Преобразование категориальных переменных в числовые
         method: 'onehot' - one-hot encoding,
                 'label' - label encoding
         """
         df_encoded = df.copy()
+
+        df_cols = df.columns if encoded_cols == None else encoded_cols
         
-        for col in df.columns:
+        for col in df_cols:
             if df[col].dtype == 'object' or (df[col].dtype.name == 'category'):
                 if method == 'onehot':
                     dummies = pd.get_dummies(df[col], prefix=col, drop_first=True)
@@ -579,7 +581,7 @@ class DataAnalyzer:
         --------
         pd.DataFrame: Очищенный датафрейм с нормализованными данными
         """
-        df_clean = self.df_processed.copy()
+        df_clean = self.df_processed[self.numerical_cols].copy()
         
         # 1. Удаляем оригинальные колонки (не нормализованные)
         if drop_original:
@@ -930,37 +932,14 @@ class DataAnalyzer:
             raise ValueError("method must be 'pca' or 'fa'")
         
         return list(important)
-
 # ===============================
-# Пример использования с реальными данными
-# ===============================
-if __name__ == "__main__":
-    # Создаём DataFrame из предоставленных данных
-    #data_str = """timestamp,charger_current,charger_status,charger_temp,charger_voltage,display_brightness,fg_capacity,fg_current,fg_temp,fg_voltage,mcu_freq,mcu_temp,second_core_state,temp_sensor
-#1776283323418,465000,Charging,550,4678000,15,51,-155937,464,3819140,300000,60000,0,5567
-#1776283324418,465000,Charging,550,4677000,15,51,-155937,464,3819062,300000,60000,0,5567
-#1776283325418,465000,Charging,550,4679000,15,51,-156250,463,3819062,300000,60000,0,5567
-#1776283326418,465000,Charging,550,4678000,15,51,-156250,463,3819062,300000,60000,0,5567
-#1776283327418,465000,Charging,550,4678000,15,51,-155625,463,3819062,300000,60000,0,5566
-#1776283328418,465000,Charging,550,4677000,15,51,-155312,463,3819062,300000,60000,0,5566
-#1776283329418,465000,Charging,550,4679000,15,51,-155468,463,3819062,300000,60000,0,5566"""
-    
-    # Загружаем данные
-    #from io import StringIO
-    #df = pd.read_csv("/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_20260416_030203.csv")
-    
-    import glob
-    import sys
-
-    WIN_PATH="G:/Yadisk/YandexDisk/Учёба/ВКР/vkr_log/metrics_*.csv"
-    LIN_PATH="/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_*.csv"
-    files = glob.glob(LIN_PATH if sys.platform == "linux" else WIN_PATH)
-    df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
-
+# Подготовка Данных
+# ===============================  
+def data_prepare(df_orig):
     print("=== Исходные данные ===")
-    print(df.head())
+    print(df_orig.head())
     print("\nТипы данных:")
-    print(df.dtypes)
+    print(df_orig.dtypes)
     
     # Блок подготовки данных
     print("\n" + "="*50)
@@ -983,15 +962,37 @@ if __name__ == "__main__":
     print("\n" + "="*50)
     print("Блок анализа данных")
     print("="*50)
+    return df_prepared
+# ===============================
+# Анализ Данных
+# ===============================    
+def analyze(df_orig):
+        # Исключаем служебные колонки из анализа
+    exclude = ['timestamp', 
+               'charger_current', 
+               'charger_temp', 
+               'charger_voltage',
+               'display_brightness', 
+               'fg_capacity', 
+               'fg_current', 
+               'fg_temp',
+               'fg_voltage', 
+               'mcu_freq', 
+               'mcu_temp', 
+               'second_core_state',
+               'temp_sensor',
+               'timestamp_normalized',
+               'charger_current_unit_encoded',
+               'charger_temp_unit_encoded', 
+               'charger_voltage_unit_encoded',
+               'fg_current_unit_encoded', 
+               'fg_temp_unit_encoded',
+               'fg_voltage_unit_encoded', 
+               'mcu_freq_unit_encoded',
+               'mcu_temp_unit_encoded', 
+               'temp_sensor_unit_encoded']
     
-    # Исключаем служебные колонки из анализа
-    exclude = ['timestamp', 'charger_status', 'charger_status_encoded',
-               'charger_current_normalized_unit', 'charger_voltage_normalized_unit',
-               'charger_temp_normalized_unit']
-    
-    analyzer = DataAnalyzer(df_prepared, exclude_cols=exclude)
-
-    
+    analyzer = DataAnalyzer(df_orig, exclude_cols=exclude)
     
     # Информация о масштабах
     analyzer.print_data_scale_info()
@@ -1119,3 +1120,824 @@ if __name__ == "__main__":
         print(f"\nГотово! Получено {len(feature_columns)} факторов для моделирования:")
         print(f"  Факторы: {feature_columns}")
         print(f"  Размер матрицы признаков: {X_for_model.shape}")
+
+# ===============================
+# Создание модели на PCA
+# ===============================
+# ===============================
+# Создание модели на PCA
+# ===============================
+def pca_modeling(df_orig):
+    """
+    Построение модели предсказания charger_temp_normalized на основе PCA компонент
+    """
+    print("\n" + "="*60)
+    print("МОДЕЛИРОВАНИЕ НА ОСНОВЕ PCA КОМПОНЕНТ")
+    print("="*60)
+    
+    # Создаем анализатор (как в analyze функции)
+    exclude = ['timestamp', 
+               'charger_current', 
+               'charger_temp', 
+               'charger_voltage',
+               'display_brightness', 
+               'fg_capacity', 
+               'fg_current', 
+               'fg_temp',
+               'fg_voltage', 
+               'mcu_freq', 
+               'mcu_temp', 
+               'second_core_state',
+               'temp_sensor',
+               'timestamp_normalized',
+               'charger_current_unit_encoded',
+               'charger_temp_unit_encoded', 
+               'charger_voltage_unit_encoded',
+               'fg_current_unit_encoded', 
+               'fg_temp_unit_encoded',
+               'fg_voltage_unit_encoded', 
+               'mcu_freq_unit_encoded',
+               'mcu_temp_unit_encoded', 
+               'temp_sensor_unit_encoded']
+    
+    analyzer = DataAnalyzer(df_orig, exclude_cols=exclude)
+    
+    # Обработка выбросов и нормализация
+    analyzer.handle_outliers(method='robust_cap')
+    analyzer.normalize_data(method='robust')
+    
+    # Получаем чистые данные для PCA
+    clean_data = analyzer.get_clean_normalized_dataframe()
+    
+    # Проверяем наличие целевой переменной
+    target_col = 'charger_temp_normalized'
+    if target_col not in clean_data.columns:
+        print(f"Ошибка: целевая переменная '{target_col}' не найдена в данных")
+        print(f"Доступные колонки: {list(clean_data.columns)}")
+        return None
+    
+    # 1. Исключаем целевую переменную из признаков
+    feature_cols = [col for col in clean_data.columns if col != target_col]
+    X = clean_data[feature_cols].copy()
+    y = clean_data[target_col].copy()
+    
+    print(f"\nИсходные данные:")
+    print(f"  - Количество признаков: {X.shape[1]}")
+    print(f"  - Количество наблюдений: {X.shape[0]}")
+    print(f"  - Целевая переменная: {target_col}")
+    
+    # 2. Применяем PCA для получения 4 компонент
+    print("\n" + "-"*40)
+    print("Выполнение PCA (4 компоненты)...")
+    print("-"*40)
+    
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    pca = PCA(n_components=4)
+    X_pca = pca.fit_transform(X_scaled)
+    
+    # Создаем датафрейм с PCA компонентами
+    pca_columns = [f'PC{i+1}' for i in range(4)]
+    df_pca = pd.DataFrame(X_pca, columns=pca_columns, index=X.index)
+    
+    # 3. Присоединяем целевую переменную
+    df_model = df_pca.copy()
+    df_model[target_col] = y.values
+    
+    print(f"\nРезультат PCA:")
+    print(f"  - Объясненная дисперсия по компонентам: {pca.explained_variance_ratio_}")
+    print(f"  - Суммарная объясненная дисперсия: {np.sum(pca.explained_variance_ratio_)*100:.2f}%")
+    print(f"  - Форма датафрейма для модели: {df_model.shape}")
+    print(f"  - Колонки: {list(df_model.columns)}")
+    
+    # Визуализация объясненной дисперсии
+    plt.figure(figsize=(10, 5))
+    plt.bar(range(1, 5), pca.explained_variance_ratio_, alpha=0.6, label='Individual')
+    plt.plot(range(1, 5), np.cumsum(pca.explained_variance_ratio_), 
+             'ro-', label='Cumulative', linewidth=2)
+    plt.axhline(y=0.95, color='green', linestyle='--', label='95% threshold')
+    plt.xlabel('Principal Components')
+    plt.ylabel('Explained Variance Ratio')
+    plt.title('PCA: Explained Variance (4 components)')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.xticks(range(1, 5))
+    plt.tight_layout()
+    plt.show()
+    
+    # Покажем нагрузки (feature importance для PCA)
+    loadings_df = pd.DataFrame(
+        pca.components_.T,
+        columns=pca_columns,
+        index=feature_cols
+    )
+    print("\nНагрузки (loadings) компонент на исходные признаки:")
+    print(loadings_df.round(3))
+    
+    # 4. Разделение на обучающую и тестовую выборки (80/20)
+    from sklearn.model_selection import train_test_split
+    
+    X_model = df_model[pca_columns]
+    y_model = df_model[target_col]
+    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_model, y_model, 
+        test_size=0.2, 
+        random_state=42,
+        shuffle=True
+    )
+    
+    print(f"\nРазделение выборок:")
+    print(f"  - Обучающая выборка: {X_train.shape[0]} строк")
+    print(f"  - Тестовая выборка: {X_test.shape[0]} строк")
+    
+    # 5. Обучение моделей
+    from sklearn.ensemble import RandomForestRegressor
+    from xgboost import XGBRegressor
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    
+    models = {
+        'Random Forest': RandomForestRegressor(
+            n_estimators=100,
+            max_depth=10,
+            random_state=42,
+            n_jobs=-1
+        ),
+        'XGBoost': XGBRegressor(
+            n_estimators=100,
+            max_depth=6,
+            learning_rate=0.1,
+            random_state=42,
+            n_jobs=-1
+        )
+    }
+    
+    results = {}
+    
+    for model_name, model in models.items():
+        print("\n" + "="*50)
+        print(f"Обучение модели: {model_name}")
+        print("="*50)
+        
+        # Обучение
+        model.fit(X_train, y_train)
+        
+        # Предсказания
+        y_train_pred = model.predict(X_train)
+        y_test_pred = model.predict(X_test)
+        
+        # Метрики на обучающей выборке
+        train_r2 = r2_score(y_train, y_train_pred)
+        train_mae = mean_absolute_error(y_train, y_train_pred)
+        train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
+        
+        # Метрики на тестовой выборке
+        test_r2 = r2_score(y_test, y_test_pred)
+        test_mae = mean_absolute_error(y_test, y_test_pred)
+        test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+        
+        # Сохраняем результаты
+        results[model_name] = {
+            'model': model,
+            'train': {'r2': train_r2, 'mae': train_mae, 'rmse': train_rmse},
+            'test': {'r2': test_r2, 'mae': test_mae, 'rmse': test_rmse},
+            'predictions': y_test_pred,
+            'y_true': y_test
+        }
+        
+        # Выводим результаты
+        print(f"\nРезультаты на обучающей выборке:")
+        print(f"  - R² = {train_r2:.4f}")
+        print(f"  - MAE = {train_mae:.4f}")
+        print(f"  - RMSE = {train_rmse:.4f}")
+        
+        print(f"\nРезультаты на тестовой выборке:")
+        print(f"  - R² = {test_r2:.4f}")
+        print(f"  - MAE = {test_mae:.4f}")
+        print(f"  - RMSE = {test_rmse:.4f}")
+        
+        # Проверка на переобучение
+        if train_r2 - test_r2 > 0.1:
+            print(f"\n⚠️  ВНИМАНИЕ: Возможно переобучение!")
+            print(f"   Разница R²: {train_r2 - test_r2:.4f}")
+    
+    # 6. Визуализация результатов
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    
+    for idx, (model_name, result) in enumerate(results.items()):
+        row = idx // 2
+        col = idx % 2
+        
+        # График предсказанных vs реальных значений
+        axes[row, col].scatter(result['y_true'], result['predictions'], 
+                              alpha=0.5, edgecolors='k', linewidth=0.5)
+        
+        # Линия идеального предсказания
+        min_val = min(result['y_true'].min(), result['predictions'].min())
+        max_val = max(result['y_true'].max(), result['predictions'].max())
+        axes[row, col].plot([min_val, max_val], [min_val, max_val], 
+                           'r--', linewidth=2, label='Ideal')
+        
+        axes[row, col].set_xlabel('Actual Temperature')
+        axes[row, col].set_ylabel('Predicted Temperature')
+        axes[row, col].set_title(f'{model_name}\nR² = {result["test"]["r2"]:.4f}, MAE = {result["test"]["mae"]:.4f}')
+        axes[row, col].legend()
+        axes[row, col].grid(True, alpha=0.3)
+    
+    # Удаляем пустые подграфики (если моделей меньше 4)
+    if len(results) < 4:
+        for idx in range(len(results), 4):
+            row = idx // 2
+            col = idx % 2
+            axes[row, col].axis('off')
+    
+    plt.suptitle('Сравнение моделей предсказания температуры зарядки', fontsize=14)
+    plt.tight_layout()
+    plt.show()
+    
+    # 7. Сравнительная диаграмма метрик
+    metrics_df = pd.DataFrame({
+        model_name: {
+            'R² (test)': result['test']['r2'],
+            'MAE (test)': result['test']['mae'],
+            'RMSE (test)': result['test']['rmse']
+        }
+        for model_name, result in results.items()
+    }).T
+    
+    print("\n" + "="*50)
+    print("СВОДНАЯ ТАБЛИЦА РЕЗУЛЬТАТОВ")
+    print("="*50)
+    print(metrics_df.round(4))
+    
+    # Визуализация сравнения метрик
+    fig, ax = plt.subplots(figsize=(10, 6))
+    metrics_df.plot(kind='bar', ax=ax, rot=0)
+    ax.set_title('Сравнение метрик моделей на тестовой выборке')
+    ax.set_xlabel('Модель')
+    ax.set_ylabel('Значение метрики')
+    ax.legend(loc='lower right')
+    ax.grid(True, alpha=0.3, axis='y')
+    plt.tight_layout()
+    plt.show()
+    
+    # 8. Важность компонент (на основе Random Forest)
+    best_model_name = max(results, key=lambda x: results[x]['test']['r2'])
+    best_model = results[best_model_name]['model']
+    
+    if hasattr(best_model, 'feature_importances_'):
+        print(f"\nАнализ важности PCA компонент (на основе {best_model_name}):")
+        importances = best_model.feature_importances_
+        for name, imp in zip(pca_columns, importances):
+            print(f"  {name}: {imp:.4f}")
+        
+        # Визуализация важности компонент
+        plt.figure(figsize=(8, 5))
+        plt.bar(pca_columns, importances)
+        plt.xlabel('PCA Components')
+        plt.ylabel('Feature Importance')
+        plt.title(f'Важность компонент в модели {best_model_name}')
+        plt.tight_layout()
+        plt.show()
+    
+    # 9. Возвращаем результаты для дальнейшего использования
+    return {
+        'results': results,
+        'pca': pca,
+        'scaler': scaler,
+        'df_model': df_model,
+        'pca_components': pca_columns,
+        'best_model': best_model_name,
+        'metrics': metrics_df
+    }
+
+
+# ===============================
+# Моделирование на исходных признаках (без PCA)
+# ===============================
+def clean_modeling(df_prepared):
+    """
+    Построение модели предсказания charger_temp_normalized на основе исходных признаков
+    Без использования PCA, только выбранные признаки
+    """
+    print("\n" + "="*60)
+    print("МОДЕЛИРОВАНИЕ НА ИСХОДНЫХ ПРИЗНАКАХ (БЕЗ PCA)")
+    print("="*60)
+    
+    # Целевая переменная
+    target_col = 'charger_temp_normalized'
+    
+    # Выбранные признаки для моделирования
+    feature_cols = [
+        'display_brightness_normalized',
+        'fg_capacity_normalized', 
+        'fg_current_normalized', 
+        'fg_voltage_normalized', 
+        'mcu_temp_normalized'
+    ]
+    
+    # Проверяем наличие всех колонок
+    available_features = []
+    missing_features = []
+    
+    for col in feature_cols:
+        if col in df_prepared.columns:
+            available_features.append(col)
+        else:
+            missing_features.append(col)
+    
+    if missing_features:
+        print(f"\n⚠️  ВНИМАНИЕ: Отсутствуют колонки: {missing_features}")
+        print(f"   Используем только доступные: {available_features}")
+    
+    if target_col not in df_prepared.columns:
+        print(f"\n❌ ОШИБКА: Целевая переменная '{target_col}' не найдена")
+        print(f"   Доступные колонки: {list(df_prepared.columns)}")
+        return None
+    
+    # Формируем признаковое пространство и целевую переменную
+    X = df_prepared[available_features].copy()
+    y = df_prepared[target_col].copy()
+    
+    print(f"\nИсходные данные:")
+    print(f"  - Количество признаков: {X.shape[1]}")
+    print(f"  - Признаки: {available_features}")
+    print(f"  - Количество наблюдений: {X.shape[0]}")
+    print(f"  - Целевая переменная: {target_col}")
+    
+    # Статистика по данным
+    print("\nСтатистика признаков:")
+    print(X.describe().round(4))
+    
+    # Проверка корреляций с целевой переменной
+    print("\n" + "-"*40)
+    print("АНАЛИЗ КОРРЕЛЯЦИЙ С ЦЕЛЕВОЙ ПЕРЕМЕННОЙ")
+    print("-"*40)
+    
+    correlations = {}
+    for col in available_features:
+        corr = np.corrcoef(X[col], y)[0, 1]
+        correlations[col] = corr
+        print(f"  {col}: {corr:.4f}")
+    
+    # Визуализация корреляций
+    plt.figure(figsize=(10, 6))
+    corr_df = pd.DataFrame(list(correlations.items()), columns=['Feature', 'Correlation'])
+    corr_df = corr_df.sort_values('Correlation', ascending=False)
+    
+    colors = ['red' if c < 0 else 'green' for c in corr_df['Correlation']]
+    plt.barh(corr_df['Feature'], corr_df['Correlation'], color=colors, alpha=0.7)
+    plt.xlabel('Correlation with charger_temp_normalized')
+    plt.title('Корреляция признаков с целевой переменной')
+    plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+    plt.grid(True, alpha=0.3, axis='x')
+    plt.tight_layout()
+    plt.show()
+    
+    # 4. Разделение на обучающую и тестовую выборки (80/20)
+    from sklearn.model_selection import train_test_split
+    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=0.2, 
+        random_state=42,
+        shuffle=True
+    )
+    
+    print(f"\nРазделение выборок:")
+    print(f"  - Обучающая выборка: {X_train.shape[0]} строк")
+    print(f"  - Тестовая выборка: {X_test.shape[0]} строк")
+    
+    # 5. Обучение моделей
+    from sklearn.ensemble import RandomForestRegressor
+    from xgboost import XGBRegressor
+    from sklearn.linear_model import LinearRegression, Ridge, Lasso
+    from sklearn.svm import SVR
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    
+    models = {
+        'Random Forest': RandomForestRegressor(
+            n_estimators=100,
+            max_depth=10,
+            random_state=42,
+            n_jobs=-1
+        ),
+        'XGBoost': XGBRegressor(
+            n_estimators=100,
+            max_depth=6,
+            learning_rate=0.1,
+            random_state=42,
+            n_jobs=-1
+        ),
+        'Ridge Regression': Ridge(
+            alpha=1.0,
+            random_state=42
+        ),
+        'Linear Regression': LinearRegression()
+    }
+    
+    results = {}
+    
+    for model_name, model in models.items():
+        print("\n" + "="*50)
+        print(f"Обучение модели: {model_name}")
+        print("="*50)
+        
+        # Обучение
+        model.fit(X_train, y_train)
+        
+        # Предсказания
+        y_train_pred = model.predict(X_train)
+        y_test_pred = model.predict(X_test)
+        
+        # Метрики на обучающей выборке
+        train_r2 = r2_score(y_train, y_train_pred)
+        train_mae = mean_absolute_error(y_train, y_train_pred)
+        train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
+        
+        # Метрики на тестовой выборке
+        test_r2 = r2_score(y_test, y_test_pred)
+        test_mae = mean_absolute_error(y_test, y_test_pred)
+        test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+        
+        # Сохраняем результаты
+        results[model_name] = {
+            'model': model,
+            'train': {'r2': train_r2, 'mae': train_mae, 'rmse': train_rmse},
+            'test': {'r2': test_r2, 'mae': test_mae, 'rmse': test_rmse},
+            'predictions': y_test_pred,
+            'y_true': y_test
+        }
+        
+        # Выводим результаты
+        print(f"\nРезультаты на обучающей выборке:")
+        print(f"  - R² = {train_r2:.4f}")
+        print(f"  - MAE = {train_mae:.4f}")
+        print(f"  - RMSE = {train_rmse:.4f}")
+        
+        print(f"\nРезультаты на тестовой выборке:")
+        print(f"  - R² = {test_r2:.4f}")
+        print(f"  - MAE = {test_mae:.4f}")
+        print(f"  - RMSE = {test_rmse:.4f}")
+        
+        # Проверка на переобучение
+        if train_r2 - test_r2 > 0.05:
+            print(f"\n⚠️  ВНИМАНИЕ: Возможно переобучение!")
+            print(f"   Разница R²: {train_r2 - test_r2:.4f}")
+    
+    # 6. Визуализация результатов
+    n_models = len(results)
+    n_cols = 2
+    n_rows = (n_models + 1) // 2
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, 5*n_rows))
+    if n_rows == 1:
+        axes = axes.reshape(1, -1)
+    
+    for idx, (model_name, result) in enumerate(results.items()):
+        row = idx // n_cols
+        col = idx % n_cols
+        
+        # График предсказанных vs реальных значений
+        axes[row, col].scatter(result['y_true'], result['predictions'], 
+                              alpha=0.5, edgecolors='k', linewidth=0.5, s=10)
+        
+        # Линия идеального предсказания
+        min_val = min(result['y_true'].min(), result['predictions'].min())
+        max_val = max(result['y_true'].max(), result['predictions'].max())
+        axes[row, col].plot([min_val, max_val], [min_val, max_val], 
+                           'r--', linewidth=2, label='Ideal')
+        
+        axes[row, col].set_xlabel('Actual Temperature')
+        axes[row, col].set_ylabel('Predicted Temperature')
+        axes[row, col].set_title(f'{model_name}\nR² = {result["test"]["r2"]:.4f}, MAE = {result["test"]["mae"]:.4f}')
+        axes[row, col].legend()
+        axes[row, col].grid(True, alpha=0.3)
+    
+    # Удаляем пустые подграфики
+    for idx in range(len(results), n_rows * n_cols):
+        row = idx // n_cols
+        col = idx % n_cols
+        axes[row, col].axis('off')
+    
+    plt.suptitle('Сравнение моделей предсказания температуры зарядки (без PCA)', fontsize=14)
+    plt.tight_layout()
+    plt.show()
+    
+    # 7. Сравнительная диаграмма метрик
+    metrics_df = pd.DataFrame({
+        model_name: {
+            'R² (test)': result['test']['r2'],
+            'MAE (test)': result['test']['mae'],
+            'RMSE (test)': result['test']['rmse']
+        }
+        for model_name, result in results.items()
+    }).T
+    
+    print("\n" + "="*50)
+    print("СВОДНАЯ ТАБЛИЦА РЕЗУЛЬТАТОВ")
+    print("="*50)
+    print(metrics_df.round(4))
+    
+    # Визуализация сравнения метрик
+    fig, ax = plt.subplots(figsize=(12, 6))
+    metrics_df.plot(kind='bar', ax=ax, rot=15)
+    ax.set_title('Сравнение метрик моделей на тестовой выборке')
+    ax.set_xlabel('Модель')
+    ax.set_ylabel('Значение метрики')
+    ax.legend(loc='lower right')
+    ax.grid(True, alpha=0.3, axis='y')
+    plt.tight_layout()
+    plt.show()
+    
+    # 8. Важность признаков (для моделей, поддерживающих feature_importances_)
+    print("\n" + "="*50)
+    print("ВАЖНОСТЬ ПРИЗНАКОВ")
+    print("="*50)
+    
+    for model_name, result in results.items():
+        model = result['model']
+        if hasattr(model, 'feature_importances_'):
+            print(f"\n{model_name} - важность признаков:")
+            importances = model.feature_importances_
+            for feat, imp in zip(available_features, importances):
+                print(f"  {feat}: {imp:.4f}")
+            
+            # Визуализация важности
+            plt.figure(figsize=(10, 6))
+            importance_df = pd.DataFrame({
+                'Feature': available_features,
+                'Importance': importances
+            }).sort_values('Importance', ascending=True)
+            
+            plt.barh(importance_df['Feature'], importance_df['Importance'])
+            plt.xlabel('Feature Importance')
+            plt.title(f'Важность признаков - {model_name}')
+            plt.tight_layout()
+            plt.show()
+        
+        elif hasattr(model, 'coef_'):
+            print(f"\n{model_name} - коэффициенты:")
+            coefs = model.coef_ if len(model.coef_.shape) == 1 else model.coef_[0]
+            for feat, coef in zip(available_features, coefs):
+                print(f"  {feat}: {coef:.4f}")
+            
+            # Визуализация коэффициентов
+            plt.figure(figsize=(10, 6))
+            coef_df = pd.DataFrame({
+                'Feature': available_features,
+                'Coefficient': coefs
+            }).sort_values('Coefficient', ascending=True)
+            
+            colors = ['red' if c < 0 else 'green' for c in coef_df['Coefficient']]
+            plt.barh(coef_df['Feature'], coef_df['Coefficient'], color=colors)
+            plt.xlabel('Coefficient')
+            plt.title(f'Коэффициенты модели - {model_name}')
+            plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+            plt.tight_layout()
+            plt.show()
+    
+    # 9. Нахождение лучшей модели
+    best_model_name = max(results, key=lambda x: results[x]['test']['r2'])
+    best_model = results[best_model_name]['model']
+    
+    print("\n" + "="*50)
+    print("ИТОГОВЫЕ РЕЗУЛЬТАТЫ")
+    print("="*50)
+    print(f"\n✅ Лучшая модель: {best_model_name}")
+    print(f"   - R² на тесте: {results[best_model_name]['test']['r2']:.6f}")
+    print(f"   - MAE: {results[best_model_name]['test']['mae']:.6f}")
+    print(f"   - RMSE: {results[best_model_name]['test']['rmse']:.6f}")
+    
+    # Сравнение с лучшим признаком
+    best_feature = max(correlations, key=correlations.get)
+    print(f"\n📊 Интересное наблюдение:")
+    print(f"   Самый коррелирующий признак: {best_feature} (r = {correlations[best_feature]:.4f})")
+    print(f"   Но модель использует все 5 признаков для точного предсказания")
+    
+    # 10. Предсказание для примера
+    print("\n" + "="*50)
+    print("ПРИМЕР ПРЕДСКАЗАНИЯ")
+    print("="*50)
+    
+    # Берем первые 5 строк из тестовой выборки
+    sample_idx = X_test.index[:5]
+    sample_features = X_test.loc[sample_idx]
+    sample_actual = y_test.loc[sample_idx]
+    
+    predictions_df = pd.DataFrame({
+        'Actual': sample_actual.values
+    })
+    
+    for model_name, result in results.items():
+        predictions_df[f'{model_name}_Pred'] = result['predictions'][:5]
+        predictions_df[f'{model_name}_Error'] = sample_actual.values - result['predictions'][:5]
+    
+    print("\nПример предсказаний для 5 случайных наблюдений:")
+    print(predictions_df.round(6))
+    
+    # 11. Дополнительный анализ: ошибки по диапазонам температуры
+    print("\n" + "="*50)
+    print("АНАЛИЗ ОШИБОК ПО ДИАПАЗОНАМ ТЕМПЕРАТУРЫ")
+    print("="*50)
+    
+    best_result = results[best_model_name]
+    y_true = best_result['y_true']
+    y_pred = best_result['predictions']
+    errors = np.abs(y_true - y_pred)
+    
+    # Разбиваем на квантили по真实 температуре
+    temp_quantiles = pd.qcut(y_true, q=4, labels=['Низкая', 'Средняя-низкая', 'Средняя-высокая', 'Высокая'])
+    
+    error_by_temp = pd.DataFrame({
+        'Temperature_Range': temp_quantiles,
+        'Error': errors
+    }).groupby('Temperature_Range')['Error'].agg(['mean', 'std', 'max'])
+    
+    print(f"\nАнализ ошибок модели {best_model_name} по диапазонам температуры:")
+    print(error_by_temp.round(6))
+    
+    return {
+        'results': results,
+        'feature_cols': available_features,
+        'target_col': target_col,
+        'best_model': best_model_name,
+        'best_model_object': best_model,
+        'metrics': metrics_df,
+        'correlations': correlations,
+        'feature_importance': results[best_model_name]['model'].feature_importances_ if hasattr(best_model, 'feature_importances_') else None
+    }
+
+def analyze_error_distribution(results, model_name='XGBoost'):
+    """
+    Детальный анализ распределения ошибок модели
+    """
+    print("\n" + "="*60)
+    print("АНАЛИЗ РАСПРЕДЕЛЕНИЯ ОШИБОК")
+    print("="*60)
+    
+    # Получаем результаты лучшей модели
+    result = results[model_name]
+    y_true = result['y_true']
+    y_pred = result['predictions']
+    errors = np.abs(y_true - y_pred)
+    relative_errors = (errors / y_true) * 100
+    
+    # Статистика ошибок
+    print(f"\n📊 Статистика абсолютных ошибок (°C):")
+    print(f"  - Средняя ошибка (MAE): {errors.mean():.4f}")
+    print(f"  - Медианная ошибка: {errors.median():.4f}")
+    print(f"  - Стандартное отклонение: {errors.std():.4f}")
+    print(f"  - 95-й процентиль: {errors.quantile(0.95):.4f}")
+    print(f"  - 99-й процентиль: {errors.quantile(0.99):.4f}")
+    print(f"  - Максимальная ошибка: {errors.max():.4f}")
+    
+    # Анализ по порогам
+    thresholds = [0.1, 0.2, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0]
+    print(f"\n📈 Частота ошибок по порогам:")
+    print(f"{'Порог (°C)':<12} {'Кол-во':<10} {'Процент':<10} {'Накопленный %':<15}")
+    print("-" * 50)
+    
+    cumulative = 0
+    for thresh in thresholds:
+        count = (errors > thresh).sum()
+        percentage = (count / len(errors)) * 100
+        cumulative += percentage
+        print(f"{thresh:<12} {count:<10} {percentage:.4f}%     {cumulative:.4f}%")
+    
+    # Визуализация распределения ошибок
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    
+    # 1. Гистограмма ошибок
+    axes[0, 0].hist(errors, bins=100, alpha=0.7, edgecolor='black', density=True)
+    axes[0, 0].axvline(errors.mean(), color='red', linestyle='--', label=f'Mean: {errors.mean():.3f}')
+    axes[0, 0].axvline(errors.median(), color='green', linestyle='--', label=f'Median: {errors.median():.3f}')
+    axes[0, 0].axvline(errors.quantile(0.95), color='orange', linestyle='--', label=f'95th: {errors.quantile(0.95):.3f}')
+    axes[0, 0].set_xlabel('Absolute Error (°C)')
+    axes[0, 0].set_ylabel('Density')
+    axes[0, 0].set_title(f'Distribution of Absolute Errors\n{model_name}')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # 2. Box plot ошибок
+    bp = axes[0, 1].boxplot(errors, vert=True, patch_artist=True)
+    bp['boxes'][0].set_facecolor('lightblue')
+    axes[0, 1].set_ylabel('Absolute Error (°C)')
+    axes[0, 1].set_title(f'Box Plot of Errors\n{model_name}')
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # Добавляем статистику на box plot
+    stats_text = f"Q1: {errors.quantile(0.25):.3f}\nQ3: {errors.quantile(0.75):.3f}\nIQR: {errors.quantile(0.75) - errors.quantile(0.25):.3f}"
+    axes[0, 1].text(0.7, errors.quantile(0.75), stats_text, bbox=dict(boxstyle="round", facecolor='wheat', alpha=0.5))
+    
+    # 3. QQ plot (для проверки нормальности)
+    from scipy import stats as scipy_stats
+    scipy_stats.probplot(errors, dist="norm", plot=axes[1, 0])
+    axes[1, 0].set_title(f'Q-Q Plot of Errors\n{model_name}')
+    axes[1, 0].grid(True, alpha=0.3)
+    
+    # 4. Зависимость ошибки от реальной температуры
+    axes[1, 1].scatter(y_true, errors, alpha=0.3, s=5)
+    axes[1, 1].set_xlabel('Actual Temperature (°C)')
+    axes[1, 1].set_ylabel('Absolute Error (°C)')
+    axes[1, 1].set_title(f'Error vs Actual Temperature\n{model_name}')
+    axes[1, 1].grid(True, alpha=0.3)
+    
+    # Добавляем линию тренда
+    z = np.polyfit(y_true, errors, 1)
+    p = np.poly1d(z)
+    axes[1, 1].plot(y_true.sort_values(), p(y_true.sort_values()), "r--", alpha=0.8, label=f'Trend: {z[0]:.4f}°C/°C')
+    axes[1, 1].legend()
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Анализ больших ошибок
+    print(f"\n🔍 Анализ больших ошибок ( > 2°C ):")
+    large_errors_mask = errors > 2.0
+    large_errors_count = large_errors_mask.sum()
+    large_errors_percent = (large_errors_count / len(errors)) * 100
+    
+    print(f"  - Количество больших ошибок: {large_errors_count} из {len(errors)} ({large_errors_percent:.4f}%)")
+    
+    if large_errors_count > 0:
+        large_errors_df = pd.DataFrame({
+            'Actual': y_true[large_errors_mask],
+            'Predicted': y_pred[large_errors_mask],
+            'Absolute_Error': errors[large_errors_mask],
+            'Relative_Error_%': relative_errors[large_errors_mask]
+        }).sort_values('Absolute_Error', ascending=False)
+        
+        print(f"\n  Топ-10 самых больших ошибок:")
+        print(large_errors_df.head(10).round(2))
+        
+        # Анализ температуры, где возникают большие ошибки
+        print(f"\n  Температурные диапазоны больших ошибок:")
+        temp_ranges = pd.cut(y_true[large_errors_mask], bins=[0, 20, 30, 40, 50, 60, 70, 80])
+        range_counts = temp_ranges.value_counts().sort_index()
+        for temp_range, count in range_counts.items():
+            print(f"    {temp_range}: {count} ошибок ({count/large_errors_count*100:.1f}%)")
+    
+    # Анализ относительных ошибок
+    print(f"\n📊 Относительные ошибки (% от реальной температуры):")
+    print(f"  - Средняя относительная ошибка: {relative_errors.mean():.4f}%")
+    print(f"  - Медианная относительная ошибка: {relative_errors.median():.4f}%")
+    print(f"  - Максимальная относительная ошибка: {relative_errors.max():.4f}%")
+    
+    # Вероятность ошибки > 1°C, > 2°C, > 5°C
+    print(f"\n🎯 Вероятность превышения порога:")
+    for threshold in [0.5, 1.0, 2.0, 5.0]:
+        prob = (errors > threshold).mean() * 100
+        print(f"  P(error > {threshold}°C) = {prob:.4f}%")
+    
+    return {
+        'errors': errors,
+        'relative_errors': relative_errors,
+        'stats': {
+            'mean': errors.mean(),
+            'median': errors.median(),
+            'std': errors.std(),
+            'q95': errors.quantile(0.95),
+            'q99': errors.quantile(0.99),
+            'max': errors.max()
+        },
+        'large_errors': large_errors_df if large_errors_count > 0 else None
+    }
+
+# ===============================
+# Пример использования с реальными данными
+# ===============================
+if __name__ == "__main__":
+    # Создаём DataFrame из предоставленных данных
+    #data_str = """timestamp,charger_current,charger_status,charger_temp,charger_voltage,display_brightness,fg_capacity,fg_current,fg_temp,fg_voltage,mcu_freq,mcu_temp,second_core_state,temp_sensor
+#1776283323418,465000,Charging,550,4678000,15,51,-155937,464,3819140,300000,60000,0,5567
+#1776283324418,465000,Charging,550,4677000,15,51,-155937,464,3819062,300000,60000,0,5567
+#1776283325418,465000,Charging,550,4679000,15,51,-156250,463,3819062,300000,60000,0,5567
+#1776283326418,465000,Charging,550,4678000,15,51,-156250,463,3819062,300000,60000,0,5567
+#1776283327418,465000,Charging,550,4678000,15,51,-155625,463,3819062,300000,60000,0,5566
+#1776283328418,465000,Charging,550,4677000,15,51,-155312,463,3819062,300000,60000,0,5566
+#1776283329418,465000,Charging,550,4679000,15,51,-155468,463,3819062,300000,60000,0,5566"""
+    
+    # Загружаем данные
+    #from io import StringIO
+    #df = pd.read_csv("/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_20260416_030203.csv")
+    
+    import glob
+    import sys
+
+    WIN_PATH="G:/Yadisk/YandexDisk/Учёба/ВКР/vkr_log/metrics_*.csv"
+    LIN_PATH="/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_*.csv"
+    files = glob.glob(LIN_PATH if sys.platform == "linux" else WIN_PATH)
+    df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+
+    df_prepared = data_prepare(df)
+
+    #analyze(df_prepared)
+    #pca_modeling(df_prepared)
+
+    results = clean_modeling(df_prepared)
+
+    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
+    error_analysis = analyze_error_distribution(results['results'], best_model_name)
+
