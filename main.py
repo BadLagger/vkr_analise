@@ -950,8 +950,11 @@ if __name__ == "__main__":
     #df = pd.read_csv("/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_20260416_030203.csv")
     
     import glob
+    import sys
 
-    files = glob.glob("G:/Yadisk/YandexDisk/Учёба/ВКР/vkr_log/metrics_*.csv")
+    WIN_PATH="G:/Yadisk/YandexDisk/Учёба/ВКР/vkr_log/metrics_*.csv"
+    LIN_PATH="/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_*.csv"
+    files = glob.glob(LIN_PATH if sys.platform == "linux" else WIN_PATH)
     df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
 
     print("=== Исходные данные ===")
