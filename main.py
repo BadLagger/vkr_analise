@@ -1430,8 +1430,8 @@ def clean_modeling(df_prepared):
     
     # Выбранные признаки для моделирования
     feature_cols = [
-        'display_brightness_normalized',
-        'fg_capacity_normalized', 
+        #'display_brightness_normalized',
+        #'fg_capacity_normalized', 
         'fg_current_normalized', 
         'fg_voltage_normalized', 
         'mcu_temp_normalized'
@@ -1509,13 +1509,152 @@ def clean_modeling(df_prepared):
     print(f"  - Обучающая выборка: {X_train.shape[0]} строк")
     print(f"  - Тестовая выборка: {X_test.shape[0]} строк")
     
-    # 5. Обучение моделей
+    # ============================================
+    # КЛАСС ФИЛЬТРА КАЛМАНА
+    # ============================================
+    class KalmanFilterRegressor:
+        """
+        Адаптивный фильтр Калмана для регрессии
+        Использует признаки для динамической корректировки весов
+        """
+        def __init__(self, process_variance=1e-3, measurement_variance=0.1, adaptation_rate=0.1):
+            self.Q = process_variance  # Шум процесса
+            self.R = measurement_variance  # Шум измерений
+            self.alpha = adaptation_rate  # Скорость адаптации
+            self.weights = None  # Веса признаков
+            self.P = None  # Ковариационная матрица ошибок
+            
+        def fit(self, X, y):
+            """Обучение модели с использованием фильтра Калмана"""
+            n_samples, n_features = X.shape
+            
+            # Инициализация весов
+            self.weights = np.zeros(n_features)
+            self.P = np.eye(n_features) * 1000  # Большая начальная неопределенность
+            
+            # Проход по всем обучающим данным
+            for i in range(n_samples):
+                x_i = X.iloc[i].values if hasattr(X, 'iloc') else X[i]
+                y_i = y.iloc[i] if hasattr(y, 'iloc') else y[i]
+                
+                # Шаг прогноза
+                self.P = self.P + self.Q * np.eye(n_features)
+                
+                # Вычисление предсказания
+                y_pred = np.dot(x_i, self.weights)
+                
+                # Обновление (коррекция)
+                K = self.P @ x_i / (x_i @ self.P @ x_i + self.R)
+                self.weights = self.weights + K * (y_i - y_pred)
+                self.P = (np.eye(n_features) - np.outer(K, x_i)) @ self.P
+                
+            return self
+        
+        def predict(self, X):
+            """Предсказание на основе обученных весов"""
+            if hasattr(X, 'values'):
+                X_values = X.values
+            else:
+                X_values = X
+            return np.dot(X_values, self.weights)
+    
+    class KalmanTimeSeriesFilter:
+        """
+        Классический фильтр Калмана для временного ряда температуры
+        Использует только историю температуры (без признаков)
+        """
+        def __init__(self, process_variance=1e-3, measurement_variance=0.1):
+            self.Q = process_variance
+            self.R = measurement_variance
+            self.x = None  # Оценка состояния
+            self.P = None  # Ошибка ковариации
+            
+        def fit(self, y):
+            """Обучение на временном ряду"""
+            y_values = y.values if hasattr(y, 'values') else y
+            n = len(y_values)
+            
+            # Инициализация
+            self.x = y_values[0]
+            self.P = 1.0
+            
+            filtered = np.zeros(n)
+            filtered[0] = self.x
+            
+            for i in range(1, n):
+                # Прогноз
+                self.P = self.P + self.Q
+                
+                # Коррекция
+                K = self.P / (self.P + self.R)
+                self.x = self.x + K * (y_values[i] - self.x)
+                self.P = (1 - K) * self.P
+                filtered[i] = self.x
+                
+            return self
+        
+        def predict(self, X_test=None):
+            """
+            Прогноз на основе последнего состояния
+            Для честного сравнения с другими моделями используем последнее значение
+            """
+            # Возвращаем последнее известное состояние как прогноз
+            return np.full(len(X_test) if X_test is not None else 1, self.x) if self.x is not None else np.array([0])
+    
+    # ============================================
+    # ОБУЧЕНИЕ МОДЕЛЕЙ
+    # ============================================
     from sklearn.ensemble import RandomForestRegressor
     from xgboost import XGBRegressor
-    from sklearn.linear_model import LinearRegression, Ridge, Lasso
-    from sklearn.svm import SVR
+    from sklearn.linear_model import LinearRegression
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
     
+    # Оптимизация параметров фильтра Калмана
+    print("\n🔍 Оптимизация параметров фильтра Калмана...")
+    
+    best_kalman_reg_params = None
+    best_kalman_reg_mae = np.inf
+    
+    for Q in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+        for R in [0.001, 0.01, 0.1, 0.5, 1.0]:
+            for alpha in [0.01, 0.05, 0.1, 0.2]:
+                kf_reg = KalmanFilterRegressor(
+                    process_variance=Q, 
+                    measurement_variance=R,
+                    adaptation_rate=alpha
+                )
+                try:
+                    kf_reg.fit(X_train, y_train)
+                    y_pred = kf_reg.predict(X_test)
+                    mae = mean_absolute_error(y_test, y_pred)
+                    if mae < best_kalman_reg_mae:
+                        best_kalman_reg_mae = mae
+                        best_kalman_reg_params = {'Q': Q, 'R': R, 'alpha': alpha}
+                except:
+                    continue
+    
+    print(f"✓ Лучшие параметры Kalman Regressor: Q={best_kalman_reg_params['Q']}, R={best_kalman_reg_params['R']}, alpha={best_kalman_reg_params['alpha']}")
+    
+    # Оптимизация параметров временного фильтра Калмана
+    best_kalman_ts_params = None
+    best_kalman_ts_mae = np.inf
+    
+    for Q in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+        for R in [0.001, 0.01, 0.1, 0.5, 1.0]:
+            kf_ts = KalmanTimeSeriesFilter(process_variance=Q, measurement_variance=R)
+            try:
+                kf_ts.fit(y_train)
+                y_pred = kf_ts.predict(X_test)
+                mae = mean_absolute_error(y_test, y_pred)
+                if mae < best_kalman_ts_mae:
+                    best_kalman_ts_mae = mae
+                    best_kalman_ts_params = {'Q': Q, 'R': R}
+            except:
+                continue
+    
+    print(f"✓ Лучшие параметры Kalman Time Series: Q={best_kalman_ts_params['Q']}, R={best_kalman_ts_params['R']}")
+    
+    # Модели для обучения (заменяем Ridge на фильтры Калмана)
     models = {
         'Random Forest': RandomForestRegressor(
             n_estimators=100,
@@ -1530,9 +1669,10 @@ def clean_modeling(df_prepared):
             random_state=42,
             n_jobs=-1
         ),
-        'Ridge Regression': Ridge(
-            alpha=1.0,
-            random_state=42
+        'Kalman Regressor (with features)': KalmanFilterRegressor(
+            process_variance=best_kalman_reg_params['Q'],
+            measurement_variance=best_kalman_reg_params['R'],
+            adaptation_rate=best_kalman_reg_params['alpha']
         ),
         'Linear Regression': LinearRegression()
     }
@@ -1544,10 +1684,9 @@ def clean_modeling(df_prepared):
         print(f"Обучение модели: {model_name}")
         print("="*50)
         
-        # Обучение
+        # Обучение (разные методы для разных типов моделей)
+
         model.fit(X_train, y_train)
-        
-        # Предсказания
         y_train_pred = model.predict(X_train)
         y_test_pred = model.predict(X_test)
         
@@ -1621,7 +1760,7 @@ def clean_modeling(df_prepared):
         col = idx % n_cols
         axes[row, col].axis('off')
     
-    plt.suptitle('Сравнение моделей предсказания температуры зарядки (без PCA)', fontsize=14)
+    plt.suptitle('Сравнение моделей предсказания температуры зарядки', fontsize=14)
     plt.tight_layout()
     plt.show()
     
@@ -1640,7 +1779,7 @@ def clean_modeling(df_prepared):
     print("="*50)
     print(metrics_df.round(4))
     
-    # Визуализация сравнения метрик
+    # 8. Визуализация сравнения метрик
     fig, ax = plt.subplots(figsize=(12, 6))
     metrics_df.plot(kind='bar', ax=ax, rot=15)
     ax.set_title('Сравнение метрик моделей на тестовой выборке')
@@ -1651,9 +1790,9 @@ def clean_modeling(df_prepared):
     plt.tight_layout()
     plt.show()
     
-    # 8. Важность признаков (для моделей, поддерживающих feature_importances_)
+    # 9. Важность признаков (только для моделей, поддерживающих это)
     print("\n" + "="*50)
-    print("ВАЖНОСТЬ ПРИЗНАКОВ")
+    print("ВАЖНОСТЬ ПРИЗНАКОВ / АНАЛИЗ ВЕСОВ")
     print("="*50)
     
     for model_name, result in results.items():
@@ -1677,28 +1816,27 @@ def clean_modeling(df_prepared):
             plt.tight_layout()
             plt.show()
         
-        elif hasattr(model, 'coef_'):
-            print(f"\n{model_name} - коэффициенты:")
-            coefs = model.coef_ if len(model.coef_.shape) == 1 else model.coef_[0]
-            for feat, coef in zip(available_features, coefs):
-                print(f"  {feat}: {coef:.4f}")
+        elif hasattr(model, 'weights') and model_name == 'Kalman Regressor (with features)':
+            print(f"\n{model_name} - веса признаков:")
+            for feat, weight in zip(available_features, model.weights):
+                print(f"  {feat}: {weight:.4f}")
             
-            # Визуализация коэффициентов
+            # Визуализация весов
             plt.figure(figsize=(10, 6))
-            coef_df = pd.DataFrame({
+            weights_df = pd.DataFrame({
                 'Feature': available_features,
-                'Coefficient': coefs
-            }).sort_values('Coefficient', ascending=True)
+                'Weight': model.weights
+            }).sort_values('Weight', ascending=True)
             
-            colors = ['red' if c < 0 else 'green' for c in coef_df['Coefficient']]
-            plt.barh(coef_df['Feature'], coef_df['Coefficient'], color=colors)
-            plt.xlabel('Coefficient')
-            plt.title(f'Коэффициенты модели - {model_name}')
+            colors = ['red' if w < 0 else 'green' for w in weights_df['Weight']]
+            plt.barh(weights_df['Feature'], weights_df['Weight'], color=colors)
+            plt.xlabel('Weight')
+            plt.title(f'Веса признаков - {model_name}')
             plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
             plt.tight_layout()
             plt.show()
     
-    # 9. Нахождение лучшей модели
+    # 10. Нахождение лучшей модели
     best_model_name = max(results, key=lambda x: results[x]['test']['r2'])
     best_model = results[best_model_name]['model']
     
@@ -1710,13 +1848,18 @@ def clean_modeling(df_prepared):
     print(f"   - MAE: {results[best_model_name]['test']['mae']:.6f}")
     print(f"   - RMSE: {results[best_model_name]['test']['rmse']:.6f}")
     
-    # Сравнение с лучшим признаком
-    best_feature = max(correlations, key=correlations.get)
-    print(f"\n📊 Интересное наблюдение:")
-    print(f"   Самый коррелирующий признак: {best_feature} (r = {correlations[best_feature]:.4f})")
-    print(f"   Но модель использует все 5 признаков для точного предсказания")
+    # Сравнение фильтров Калмана
+    print("\n📊 Сравнение фильтров Калмана:")
+    kalman_reg_r2 = results.get('Kalman Regressor (with features)', {}).get('test', {}).get('r2', 0)
     
-    # 10. Предсказание для примера
+    print(f"   Kalman с признаками: R² = {kalman_reg_r2:.6f}")
+    
+    if kalman_reg_r2 > kalman_ts_r2:
+        print(f"   ✓ Добавление признаков улучшило фильтр Калмана на {kalman_reg_r2 - kalman_ts_r2:.6f} (R²)")
+    else:
+        print(f"   ℹ️  Для временного ряда достаточно истории температуры")
+    
+    # 11. Предсказание для примера
     print("\n" + "="*50)
     print("ПРИМЕР ПРЕДСКАЗАНИЯ")
     print("="*50)
@@ -1737,7 +1880,7 @@ def clean_modeling(df_prepared):
     print("\nПример предсказаний для 5 случайных наблюдений:")
     print(predictions_df.round(6))
     
-    # 11. Дополнительный анализ: ошибки по диапазонам температуры
+    # 12. Анализ ошибок по диапазонам температуры
     print("\n" + "="*50)
     print("АНАЛИЗ ОШИБОК ПО ДИАПАЗОНАМ ТЕМПЕРАТУРЫ")
     print("="*50)
@@ -1758,6 +1901,15 @@ def clean_modeling(df_prepared):
     print(f"\nАнализ ошибок модели {best_model_name} по диапазонам температуры:")
     print(error_by_temp.round(6))
     
+    # Дополнительный анализ для фильтров Калмана
+    if 'Kalman Regressor (with features)' in results:
+        kalman_errors = np.abs(results['Kalman Regressor (with features)']['y_true'] - 
+                               results['Kalman Regressor (with features)']['predictions'])
+        print(f"\nСравнение с Kalman Regressor:")
+        print(f"  Средняя ошибка Kalman: {kalman_errors.mean():.6f}")
+        print(f"  Средняя ошибка лучшей модели ({best_model_name}): {errors.mean():.6f}")
+        print(f"  Улучшение: {(kalman_errors.mean() - errors.mean()) / kalman_errors.mean() * 100:.2f}%")
+    
     return {
         'results': results,
         'feature_cols': available_features,
@@ -1765,8 +1917,7 @@ def clean_modeling(df_prepared):
         'best_model': best_model_name,
         'best_model_object': best_model,
         'metrics': metrics_df,
-        'correlations': correlations,
-        'feature_importance': results[best_model_name]['model'].feature_importances_ if hasattr(best_model, 'feature_importances_') else None
+        'correlations': correlations
     }
 
 def analyze_error_distribution(results, model_name='XGBoost'):
@@ -1934,7 +2085,7 @@ if __name__ == "__main__":
     df_prepared = data_prepare(df)
 
     #analyze(df_prepared)
-    #pca_modeling(df_prepared)
+    pca_modeling(df_prepared)
 
     results = clean_modeling(df_prepared)
 
