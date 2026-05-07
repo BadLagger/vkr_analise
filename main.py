@@ -1193,9 +1193,9 @@ def pca_modeling(df_orig):
     print(f"  - Количество наблюдений: {X.shape[0]}")
     print(f"  - Целевая переменная: {target_col}")
     
-    # 2. Применяем PCA для получения 4 компонент
+    # 2. Применяем PCA для получения 3 компонент
     print("\n" + "-"*40)
-    print("Выполнение PCA (4 компоненты)...")
+    print("Выполнение PCA (3 компоненты)...")
     print("-"*40)
     
     start_scale_time = time.time()
@@ -1204,11 +1204,11 @@ def pca_modeling(df_orig):
     scale_time = time.time() - start_scale_time
     
     pca_start_time = time.time()
-    pca = PCA(n_components=4)
+    pca = PCA(n_components=3)
     X_pca = pca.fit_transform(X_scaled)
     
     # Создаем датафрейм с PCA компонентами
-    pca_columns = [f'PC{i+1}' for i in range(4)]
+    pca_columns = [f'PC{i+1}' for i in range(3)]
     df_pca = pd.DataFrame(X_pca, columns=pca_columns, index=X.index)
     pca_time = time.time() - pca_start_time
     
@@ -1227,9 +1227,9 @@ def pca_modeling(df_orig):
     print(f"  - Время создания PCA (мс) семпла: {(pca_time/len(X_scaled))*1000}")
     
     # Визуализация объясненной дисперсии
-    plt.figure(figsize=(10, 5))
-    plt.bar(range(1, 5), pca.explained_variance_ratio_, alpha=0.6, label='Individual')
-    plt.plot(range(1, 5), np.cumsum(pca.explained_variance_ratio_), 
+    plt.figure(figsize=(10, 4))
+    plt.bar(range(1, 4), pca.explained_variance_ratio_, alpha=0.6, label='Individual')
+    plt.plot(range(1, 4), np.cumsum(pca.explained_variance_ratio_), 
              'ro-', label='Cumulative', linewidth=2)
     plt.axhline(y=0.95, color='green', linestyle='--', label='95% threshold')
     plt.xlabel('Principal Components')
@@ -1237,7 +1237,7 @@ def pca_modeling(df_orig):
     plt.title('PCA: Explained Variance (4 components)')
     plt.legend()
     plt.grid(True, alpha=0.3)
-    plt.xticks(range(1, 5))
+    plt.xticks(range(1, 4))
     plt.tight_layout()
     plt.show()
     
@@ -1459,8 +1459,8 @@ def clean_modeling(df_prepared):
     
     # Выбранные признаки для моделирования
     feature_cols = [
-        'display_brightness_normalized',
-        'fg_capacity_normalized', 
+        #'display_brightness_normalized',
+        #'fg_capacity_normalized', 
         'fg_current_normalized', 
         'fg_voltage_normalized', 
         'mcu_temp_normalized'
@@ -1749,10 +1749,10 @@ def clean_modeling(df_prepared):
     print(f"   - RMSE: {results[best_model_name]['test']['rmse']:.6f}")
     
     # Сравнение фильтров Калмана
-    print("\n📊 Сравнение фильтров Калмана:")
-    kalman_reg_r2 = results.get('Kalman Regressor (with features)', {}).get('test', {}).get('r2', 0)
+    #print("\n📊 Сравнение фильтров Калмана:")
+    #kalman_reg_r2 = results.get('Kalman Regressor (with features)', {}).get('test', {}).get('r2', 0)
     
-    print(f"   Kalman с признаками: R² = {kalman_reg_r2:.6f}")
+    #print(f"   Kalman с признаками: R² = {kalman_reg_r2:.6f}")
     
     #if kalman_reg_r2 > kalman_ts_r2:
     #    print(f"   ✓ Добавление признаков улучшило фильтр Калмана на {kalman_reg_r2 - kalman_ts_r2:.6f} (R²)")
@@ -1790,7 +1790,7 @@ def clean_modeling(df_prepared):
     y_pred = best_result['predictions']
     errors = np.abs(y_true - y_pred)
     
-    # Разбиваем на квантили по真实 температуре
+    # Разбиваем на квантили по температуре
     temp_quantiles = pd.qcut(y_true, q=4, labels=['Низкая', 'Средняя-низкая', 'Средняя-высокая', 'Высокая'])
     
     error_by_temp = pd.DataFrame({
@@ -1802,13 +1802,13 @@ def clean_modeling(df_prepared):
     print(error_by_temp.round(6))
     
     # Дополнительный анализ для фильтров Калмана
-    if 'Kalman Regressor (with features)' in results:
-        kalman_errors = np.abs(results['Kalman Regressor (with features)']['y_true'] - 
-                               results['Kalman Regressor (with features)']['predictions'])
-        print(f"\nСравнение с Kalman Regressor:")
-        print(f"  Средняя ошибка Kalman: {kalman_errors.mean():.6f}")
-        print(f"  Средняя ошибка лучшей модели ({best_model_name}): {errors.mean():.6f}")
-        print(f"  Улучшение: {(kalman_errors.mean() - errors.mean()) / kalman_errors.mean() * 100:.2f}%")
+    #if 'Kalman Regressor (with features)' in results:
+    #    kalman_errors = np.abs(results['Kalman Regressor (with features)']['y_true'] - 
+    #                           results['Kalman Regressor (with features)']['predictions'])
+    #    print(f"\nСравнение с Kalman Regressor:")
+    #    print(f"  Средняя ошибка Kalman: {kalman_errors.mean():.6f}")
+    #    print(f"  Средняя ошибка лучшей модели ({best_model_name}): {errors.mean():.6f}")
+    #    print(f"  Улучшение: {(kalman_errors.mean() - errors.mean()) / kalman_errors.mean() * 100:.2f}%")
     
     return {
         'results': results,
@@ -1988,7 +1988,9 @@ if __name__ == "__main__":
     df_prepared = data_prepare(df)
 
     analyze(df_prepared)
-    pca_modeling(df_prepared)
+    results = pca_modeling(df_prepared)
+    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
+    error_analysis = analyze_error_distribution(results['results'], best_model_name)
 
     results = clean_modeling(df_prepared)
 
