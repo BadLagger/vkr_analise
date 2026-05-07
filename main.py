@@ -10,6 +10,7 @@ from scipy import stats
 import factor_analyzer.factor_analyzer as fa
 from factor_analyzer.factor_analyzer import calculate_kmo, calculate_bartlett_sphericity
 import warnings
+import time
 warnings.filterwarnings('ignore')
 
 # ===============================
@@ -1151,6 +1152,11 @@ def pca_modeling(df_orig):
                'second_core_state',
                'temp_sensor',
                'timestamp_normalized',
+               'charger_current_normalized',
+               'charger_voltage_normalized',
+               'mcu_freq_normalized',
+               'second_core_state_normalized',
+               'charger_status_encoded',
                'charger_current_unit_encoded',
                'charger_temp_unit_encoded', 
                'charger_voltage_unit_encoded',
@@ -1192,15 +1198,19 @@ def pca_modeling(df_orig):
     print("Выполнение PCA (4 компоненты)...")
     print("-"*40)
     
+    start_scale_time = time.time()
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
+    scale_time = time.time() - start_scale_time
     
+    pca_start_time = time.time()
     pca = PCA(n_components=4)
     X_pca = pca.fit_transform(X_scaled)
     
     # Создаем датафрейм с PCA компонентами
     pca_columns = [f'PC{i+1}' for i in range(4)]
     df_pca = pd.DataFrame(X_pca, columns=pca_columns, index=X.index)
+    pca_time = time.time() - pca_start_time
     
     # 3. Присоединяем целевую переменную
     df_model = df_pca.copy()
@@ -1211,6 +1221,10 @@ def pca_modeling(df_orig):
     print(f"  - Суммарная объясненная дисперсия: {np.sum(pca.explained_variance_ratio_)*100:.2f}%")
     print(f"  - Форма датафрейма для модели: {df_model.shape}")
     print(f"  - Колонки: {list(df_model.columns)}")
+    print(f"  - Время масштабирования (мс): {scale_time*1000}")
+    print(f"  - Время масштабирования семпла (мс): {(scale_time / len(X)) * 1000}")
+    print(f"  - Время создания PCA (мс): {pca_time*1000}")
+    print(f"  - Время создания PCA (мс) семпла: {(pca_time/len(X_scaled))*1000}")
     
     # Визуализация объясненной дисперсии
     plt.figure(figsize=(10, 5))
@@ -1241,6 +1255,7 @@ def pca_modeling(df_orig):
     
     X_model = df_model[pca_columns]
     y_model = df_model[target_col]
+    
     
     X_train, X_test, y_train, y_test = train_test_split(
         X_model, y_model, 
@@ -1282,12 +1297,25 @@ def pca_modeling(df_orig):
         print("="*50)
         
         # Обучение
+        train_start_time = time.time()
         model.fit(X_train, y_train)
+        train_time = time.time() - train_start_time
+        print(f"  - Время тренировки (с): {train_time}")
+        print(f"  - Время тренировки сэмпла (мс): {(train_time/len(X_train)) * 1000}")
         
         # Предсказания
+        train_start_time = time.time()
         y_train_pred = model.predict(X_train)
+        train_time = time.time() - train_start_time
+        print(f"  - Время предсказания на обучающей выборке (с): {train_time}")
+        print(f"  - Время предсказания сэмпла на обучающей выборке (мс): {(train_time/len(X_train)) * 1000}")
+
+        train_start_time = time.time()
         y_test_pred = model.predict(X_test)
-        
+        train_time = time.time() - train_start_time
+        print(f"  - Время предсказания на тестовой выборке (с): {train_time}")
+        print(f"  - Время предсказания сэмпла на тестовой выборке (мс): {(train_time/len(X_test)) * 1000}")
+
         # Метрики на обучающей выборке
         train_r2 = r2_score(y_train, y_train_pred)
         train_mae = mean_absolute_error(y_train, y_train_pred)
@@ -1431,8 +1459,8 @@ def clean_modeling(df_prepared):
     
     # Выбранные признаки для моделирования
     feature_cols = [
-        #'display_brightness_normalized',
-        #'fg_capacity_normalized', 
+        'display_brightness_normalized',
+        'fg_capacity_normalized', 
         'fg_current_normalized', 
         'fg_voltage_normalized', 
         'mcu_temp_normalized'
@@ -1511,98 +1539,6 @@ def clean_modeling(df_prepared):
     print(f"  - Тестовая выборка: {X_test.shape[0]} строк")
     
     # ============================================
-    # КЛАСС ФИЛЬТРА КАЛМАНА
-    # ============================================
-    class KalmanFilterRegressor:
-        """
-        Адаптивный фильтр Калмана для регрессии
-        Использует признаки для динамической корректировки весов
-        """
-        def __init__(self, process_variance=1e-3, measurement_variance=0.1, adaptation_rate=0.1):
-            self.Q = process_variance  # Шум процесса
-            self.R = measurement_variance  # Шум измерений
-            self.alpha = adaptation_rate  # Скорость адаптации
-            self.weights = None  # Веса признаков
-            self.P = None  # Ковариационная матрица ошибок
-            
-        def fit(self, X, y):
-            """Обучение модели с использованием фильтра Калмана"""
-            n_samples, n_features = X.shape
-            
-            # Инициализация весов
-            self.weights = np.zeros(n_features)
-            self.P = np.eye(n_features) * 1000  # Большая начальная неопределенность
-            
-            # Проход по всем обучающим данным
-            for i in range(n_samples):
-                x_i = X.iloc[i].values if hasattr(X, 'iloc') else X[i]
-                y_i = y.iloc[i] if hasattr(y, 'iloc') else y[i]
-                
-                # Шаг прогноза
-                self.P = self.P + self.Q * np.eye(n_features)
-                
-                # Вычисление предсказания
-                y_pred = np.dot(x_i, self.weights)
-                
-                # Обновление (коррекция)
-                K = self.P @ x_i / (x_i @ self.P @ x_i + self.R)
-                self.weights = self.weights + K * (y_i - y_pred)
-                self.P = (np.eye(n_features) - np.outer(K, x_i)) @ self.P
-                
-            return self
-        
-        def predict(self, X):
-            """Предсказание на основе обученных весов"""
-            if hasattr(X, 'values'):
-                X_values = X.values
-            else:
-                X_values = X
-            return np.dot(X_values, self.weights)
-    
-    class KalmanTimeSeriesFilter:
-        """
-        Классический фильтр Калмана для временного ряда температуры
-        Использует только историю температуры (без признаков)
-        """
-        def __init__(self, process_variance=1e-3, measurement_variance=0.1):
-            self.Q = process_variance
-            self.R = measurement_variance
-            self.x = None  # Оценка состояния
-            self.P = None  # Ошибка ковариации
-            
-        def fit(self, y):
-            """Обучение на временном ряду"""
-            y_values = y.values if hasattr(y, 'values') else y
-            n = len(y_values)
-            
-            # Инициализация
-            self.x = y_values[0]
-            self.P = 1.0
-            
-            filtered = np.zeros(n)
-            filtered[0] = self.x
-            
-            for i in range(1, n):
-                # Прогноз
-                self.P = self.P + self.Q
-                
-                # Коррекция
-                K = self.P / (self.P + self.R)
-                self.x = self.x + K * (y_values[i] - self.x)
-                self.P = (1 - K) * self.P
-                filtered[i] = self.x
-                
-            return self
-        
-        def predict(self, X_test=None):
-            """
-            Прогноз на основе последнего состояния
-            Для честного сравнения с другими моделями используем последнее значение
-            """
-            # Возвращаем последнее известное состояние как прогноз
-            return np.full(len(X_test) if X_test is not None else 1, self.x) if self.x is not None else np.array([0])
-    
-    # ============================================
     # ОБУЧЕНИЕ МОДЕЛЕЙ
     # ============================================
     from sklearn.ensemble import RandomForestRegressor
@@ -1610,52 +1546,6 @@ def clean_modeling(df_prepared):
     from sklearn.linear_model import LinearRegression
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
     
-    # Оптимизация параметров фильтра Калмана
-    #print("\n🔍 Оптимизация параметров фильтра Калмана...")
-    
-    #best_kalman_reg_params = None
-    #best_kalman_reg_mae = np.inf
-    
-    #for Q in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
-    #    for R in [0.001, 0.01, 0.1, 0.5, 1.0]:
-    #        for alpha in [0.01, 0.05, 0.1, 0.2]:
-    #            kf_reg = KalmanFilterRegressor(
-    #                process_variance=Q, 
-    #                measurement_variance=R,
-    #                adaptation_rate=alpha
-    #            )
-    #            try:
-    #                kf_reg.fit(X_train, y_train)
-    ##                y_pred = kf_reg.predict(X_test)
-     #               mae = mean_absolute_error(y_test, y_pred)
-     #               if mae < best_kalman_reg_mae:
-     #                   best_kalman_reg_mae = mae
-     #                   best_kalman_reg_params = {'Q': Q, 'R': R, 'alpha': alpha}
-     #           except:
-     #               continue
-    
-    #print(f"✓ Лучшие параметры Kalman Regressor: Q={best_kalman_reg_params['Q']}, R={best_kalman_reg_params['R']}, alpha={best_kalman_reg_params['alpha']}")
-    
-    # Оптимизация параметров временного фильтра Калмана
-    #best_kalman_ts_params = None
-    #best_kalman_ts_mae = np.inf
-    
-    #for Q in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
-    ##    for R in [0.001, 0.01, 0.1, 0.5, 1.0]:
-     #       kf_ts = KalmanTimeSeriesFilter(process_variance=Q, measurement_variance=R)
-     #       try:
-      #          kf_ts.fit(y_train)
-      #          y_pred = kf_ts.predict(X_test)
-      #          mae = mean_absolute_error(y_test, y_pred)
-      #          if mae < best_kalman_ts_mae:
-      #              best_kalman_ts_mae = mae
-      #              best_kalman_ts_params = {'Q': Q, 'R': R}
-      #      except:
-      #          continue
-    
-   # print(f"✓ Лучшие параметры Kalman Time Series: Q={best_kalman_ts_params['Q']}, R={best_kalman_ts_params['R']}")
-    
-    # Модели для обучения (заменяем Ridge на фильтры Калмана)
     models = {
         'Random Forest': RandomForestRegressor(
             n_estimators=100,
@@ -1670,11 +1560,6 @@ def clean_modeling(df_prepared):
             random_state=42,
             n_jobs=-1
         ),
-        #'Kalman Regressor (with features)': KalmanFilterRegressor(
-        #    process_variance=best_kalman_reg_params['Q'],
-        #    measurement_variance=best_kalman_reg_params['R'],
-        #    adaptation_rate=best_kalman_reg_params['alpha']
-        #),
         'Linear Regression': LinearRegression()
     }
     
@@ -1687,9 +1572,23 @@ def clean_modeling(df_prepared):
         
         # Обучение (разные методы для разных типов моделей)
 
+        train_start_time = time.time()
         model.fit(X_train, y_train)
+        train_time = time.time() - train_start_time
+        print(f"  - Время обучения (с): {train_time}")
+        print(f"  - Время обучения сэмпла (мс): {(train_time/len(X_train)) * 1000}")
+
+        train_start_time = time.time()
         y_train_pred = model.predict(X_train)
+        train_time = time.time() - train_start_time
+        print(f"  - Время предсказания на обучающей выборке (с): {train_time}")
+        print(f"  - Время предскзания сэмпла на обучающей выборке (мс): {(train_time/len(X_train)) * 1000}")
+
+        train_start_time = time.time()
         y_test_pred = model.predict(X_test)
+        train_time = time.time() - train_start_time
+        print(f"  - Время предсказания на тестовой выборке (с): {train_time}")
+        print(f"  - Время предскзания сэмпла на тестовой выборке (мс): {(train_time/len(X_test)) * 1000}")
         
         # Метрики на обучающей выборке
         train_r2 = r2_score(y_train, y_train_pred)
