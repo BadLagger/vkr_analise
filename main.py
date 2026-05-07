@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.decomposition import PCA
@@ -1610,49 +1611,49 @@ def clean_modeling(df_prepared):
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
     
     # Оптимизация параметров фильтра Калмана
-    print("\n🔍 Оптимизация параметров фильтра Калмана...")
+    #print("\n🔍 Оптимизация параметров фильтра Калмана...")
     
-    best_kalman_reg_params = None
-    best_kalman_reg_mae = np.inf
+    #best_kalman_reg_params = None
+    #best_kalman_reg_mae = np.inf
     
-    for Q in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
-        for R in [0.001, 0.01, 0.1, 0.5, 1.0]:
-            for alpha in [0.01, 0.05, 0.1, 0.2]:
-                kf_reg = KalmanFilterRegressor(
-                    process_variance=Q, 
-                    measurement_variance=R,
-                    adaptation_rate=alpha
-                )
-                try:
-                    kf_reg.fit(X_train, y_train)
-                    y_pred = kf_reg.predict(X_test)
-                    mae = mean_absolute_error(y_test, y_pred)
-                    if mae < best_kalman_reg_mae:
-                        best_kalman_reg_mae = mae
-                        best_kalman_reg_params = {'Q': Q, 'R': R, 'alpha': alpha}
-                except:
-                    continue
+    #for Q in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+    #    for R in [0.001, 0.01, 0.1, 0.5, 1.0]:
+    #        for alpha in [0.01, 0.05, 0.1, 0.2]:
+    #            kf_reg = KalmanFilterRegressor(
+    #                process_variance=Q, 
+    #                measurement_variance=R,
+    #                adaptation_rate=alpha
+    #            )
+    #            try:
+    #                kf_reg.fit(X_train, y_train)
+    ##                y_pred = kf_reg.predict(X_test)
+     #               mae = mean_absolute_error(y_test, y_pred)
+     #               if mae < best_kalman_reg_mae:
+     #                   best_kalman_reg_mae = mae
+     #                   best_kalman_reg_params = {'Q': Q, 'R': R, 'alpha': alpha}
+     #           except:
+     #               continue
     
-    print(f"✓ Лучшие параметры Kalman Regressor: Q={best_kalman_reg_params['Q']}, R={best_kalman_reg_params['R']}, alpha={best_kalman_reg_params['alpha']}")
+    #print(f"✓ Лучшие параметры Kalman Regressor: Q={best_kalman_reg_params['Q']}, R={best_kalman_reg_params['R']}, alpha={best_kalman_reg_params['alpha']}")
     
     # Оптимизация параметров временного фильтра Калмана
-    best_kalman_ts_params = None
-    best_kalman_ts_mae = np.inf
+    #best_kalman_ts_params = None
+    #best_kalman_ts_mae = np.inf
     
-    for Q in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
-        for R in [0.001, 0.01, 0.1, 0.5, 1.0]:
-            kf_ts = KalmanTimeSeriesFilter(process_variance=Q, measurement_variance=R)
-            try:
-                kf_ts.fit(y_train)
-                y_pred = kf_ts.predict(X_test)
-                mae = mean_absolute_error(y_test, y_pred)
-                if mae < best_kalman_ts_mae:
-                    best_kalman_ts_mae = mae
-                    best_kalman_ts_params = {'Q': Q, 'R': R}
-            except:
-                continue
+    #for Q in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+    ##    for R in [0.001, 0.01, 0.1, 0.5, 1.0]:
+     #       kf_ts = KalmanTimeSeriesFilter(process_variance=Q, measurement_variance=R)
+     #       try:
+      #          kf_ts.fit(y_train)
+      #          y_pred = kf_ts.predict(X_test)
+      #          mae = mean_absolute_error(y_test, y_pred)
+      #          if mae < best_kalman_ts_mae:
+      #              best_kalman_ts_mae = mae
+      #              best_kalman_ts_params = {'Q': Q, 'R': R}
+      #      except:
+      #          continue
     
-    print(f"✓ Лучшие параметры Kalman Time Series: Q={best_kalman_ts_params['Q']}, R={best_kalman_ts_params['R']}")
+   # print(f"✓ Лучшие параметры Kalman Time Series: Q={best_kalman_ts_params['Q']}, R={best_kalman_ts_params['R']}")
     
     # Модели для обучения (заменяем Ridge на фильтры Калмана)
     models = {
@@ -1669,11 +1670,11 @@ def clean_modeling(df_prepared):
             random_state=42,
             n_jobs=-1
         ),
-        'Kalman Regressor (with features)': KalmanFilterRegressor(
-            process_variance=best_kalman_reg_params['Q'],
-            measurement_variance=best_kalman_reg_params['R'],
-            adaptation_rate=best_kalman_reg_params['alpha']
-        ),
+        #'Kalman Regressor (with features)': KalmanFilterRegressor(
+        #    process_variance=best_kalman_reg_params['Q'],
+        #    measurement_variance=best_kalman_reg_params['R'],
+        #    adaptation_rate=best_kalman_reg_params['alpha']
+        #),
         'Linear Regression': LinearRegression()
     }
     
@@ -1854,10 +1855,10 @@ def clean_modeling(df_prepared):
     
     print(f"   Kalman с признаками: R² = {kalman_reg_r2:.6f}")
     
-    if kalman_reg_r2 > kalman_ts_r2:
-        print(f"   ✓ Добавление признаков улучшило фильтр Калмана на {kalman_reg_r2 - kalman_ts_r2:.6f} (R²)")
-    else:
-        print(f"   ℹ️  Для временного ряда достаточно истории температуры")
+    #if kalman_reg_r2 > kalman_ts_r2:
+    #    print(f"   ✓ Добавление признаков улучшило фильтр Калмана на {kalman_reg_r2 - kalman_ts_r2:.6f} (R²)")
+    #else:
+    #    print(f"   ℹ️  Для временного ряда достаточно истории температуры")
     
     # 11. Предсказание для примера
     print("\n" + "="*50)
@@ -2082,9 +2083,12 @@ if __name__ == "__main__":
     files = glob.glob(LIN_PATH if sys.platform == "linux" else WIN_PATH)
     df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
 
+    #if sys.platform != "linux":
+    #    matplotlib.use('Qt5Agg')
+
     df_prepared = data_prepare(df)
 
-    #analyze(df_prepared)
+    analyze(df_prepared)
     pca_modeling(df_prepared)
 
     results = clean_modeling(df_prepared)
