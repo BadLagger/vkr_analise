@@ -197,6 +197,7 @@ class DataAnalyzer:
                                and not c.endswith('_original')]  # исключаем оригиналы
         
         print(f"Колонки для анализа: {self.numerical_cols}")
+        self.last_scaler = None
         
         # Автоматически определяем масштабы
         self.scales = {}
@@ -209,6 +210,12 @@ class DataAnalyzer:
                     'max': df[col].max(),
                     'range': df[col].max() - df[col].min()
                 }
+    
+    def get_original_clean(self):
+        return self.df_original[self.numerical_cols]
+    
+    def get_last_scaler(self):
+        return self.last_scaler
     
     def get_pca_with_correlations(self, variance_threshold=0.90, n_components=None):
         """
@@ -564,7 +571,7 @@ class DataAnalyzer:
             self.df_processed[self.numerical_cols] = scaler.fit_transform(
                 self.df_processed[self.numerical_cols]
             )
-        
+        self.last_scaler = scaler
         print(f"Нормализация выполнена методом: {method}")
         return self.df_processed
     
@@ -998,6 +1005,7 @@ def analyze(df_orig):
     
     # Информация о масштабах
     analyzer.print_data_scale_info()
+
     
     # Обнаружение выбросов
     print("\n=== Обнаружение выбросов ===")
@@ -1175,7 +1183,24 @@ def pca_modeling(df_orig):
     
     # Получаем чистые данные для PCA
     clean_data = analyzer.get_clean_normalized_dataframe()
-    
+    print("Данные после PCA")
+    print(clean_data)
+
+    print("Данные оригинальные")
+    original_df = analyzer.get_original_clean()
+    print(original_df)
+    original_temp_idx = list(original_df.columns).index('charger_temp_normalized')
+    print(f"Индекс: {original_temp_idx}")
+
+    print("Машстабатор")
+    orig_scale = analyzer.get_last_scaler().scale_[original_temp_idx]
+    orig_center = analyzer.get_last_scaler().center_[original_temp_idx]
+    print(f"scale: {orig_scale}")
+    print(f"center: {orig_center}")
+
+    restore_temp = clean_data['charger_temp_normalized']*orig_scale + orig_center
+    print(restore_temp)
+    sys.exit(0)    
     # Проверяем наличие целевой переменной
     target_col = 'charger_temp_normalized'
     if target_col not in clean_data.columns:
@@ -1987,13 +2012,14 @@ if __name__ == "__main__":
 
     df_prepared = data_prepare(df)
 
-    analyze(df_prepared)
+    print(f"Normalized charger temp: min={min(df_prepared['charger_temp_normalized'])}, max={max(df_prepared['charger_temp_normalized'])}")
+    #analyze(df_prepared)
     results = pca_modeling(df_prepared)
-    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
-    error_analysis = analyze_error_distribution(results['results'], best_model_name)
+    #best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
+    #error_analysis = analyze_error_distribution(results['results'], best_model_name)
 
-    results = clean_modeling(df_prepared)
+    #results = clean_modeling(df_prepared)
 
-    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
-    error_analysis = analyze_error_distribution(results['results'], best_model_name)
+    #best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
+    #error_analysis = analyze_error_distribution(results['results'], best_model_name)
 
