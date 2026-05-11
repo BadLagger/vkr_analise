@@ -575,6 +575,13 @@ class DataAnalyzer:
         print(f"Нормализация выполнена методом: {method}")
         return self.df_processed
     
+    def restore_column(self, column_name, column_data):
+        original_df = self.get_original_clean()
+        original_temp_idx = list(original_df.columns).index(column_name)
+        orig_scale = self.get_last_scaler().scale_[original_temp_idx]
+        orig_center = self.get_last_scaler().center_[original_temp_idx]
+        return (column_data * orig_scale + orig_center)
+    
     def get_clean_normalized_dataframe(self, drop_original=True, drop_constant=True):
         """
         Возвращает датафрейм только с нормализованными колонками.
@@ -1183,24 +1190,13 @@ def pca_modeling(df_orig):
     
     # Получаем чистые данные для PCA
     clean_data = analyzer.get_clean_normalized_dataframe()
-    print("Данные после PCA")
-    print(clean_data)
+    #print("Данные после PCA")
+    #print(clean_data)
 
-    print("Данные оригинальные")
-    original_df = analyzer.get_original_clean()
-    print(original_df)
-    original_temp_idx = list(original_df.columns).index('charger_temp_normalized')
-    print(f"Индекс: {original_temp_idx}")
+    #restore_temp = analyzer.restore_column('charger_temp_normalized', clean_data['charger_temp_normalized'])
 
-    print("Машстабатор")
-    orig_scale = analyzer.get_last_scaler().scale_[original_temp_idx]
-    orig_center = analyzer.get_last_scaler().center_[original_temp_idx]
-    print(f"scale: {orig_scale}")
-    print(f"center: {orig_center}")
-
-    restore_temp = clean_data['charger_temp_normalized']*orig_scale + orig_center
-    print(restore_temp)
-    sys.exit(0)    
+    #print(restore_temp)
+    #sys.exit(0)    
     # Проверяем наличие целевой переменной
     target_col = 'charger_temp_normalized'
     if target_col not in clean_data.columns:
@@ -1331,33 +1327,39 @@ def pca_modeling(df_orig):
         # Предсказания
         train_start_time = time.time()
         y_train_pred = model.predict(X_train)
+        y_train_pred_restored = analyzer.restore_column('charger_temp_normalized', y_train_pred)
         train_time = time.time() - train_start_time
         print(f"  - Время предсказания на обучающей выборке (с): {train_time}")
         print(f"  - Время предсказания сэмпла на обучающей выборке (мс): {(train_time/len(X_train)) * 1000}")
+        print(f"  - Восстановленная температура: min={min(y_train_pred_restored)}, max={max(y_train_pred_restored)}")
 
         train_start_time = time.time()
         y_test_pred = model.predict(X_test)
+        y_test_pred_restored = analyzer.restore_column('charger_temp_normalized', y_test_pred)
         train_time = time.time() - train_start_time
         print(f"  - Время предсказания на тестовой выборке (с): {train_time}")
         print(f"  - Время предсказания сэмпла на тестовой выборке (мс): {(train_time/len(X_test)) * 1000}")
+        print(f"  - Восстановленная температура: min={min(y_test_pred_restored)}, max={max(y_test_pred_restored)}")
 
         # Метрики на обучающей выборке
-        train_r2 = r2_score(y_train, y_train_pred)
-        train_mae = mean_absolute_error(y_train, y_train_pred)
-        train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
+        y_train_restored = analyzer.restore_column('charger_temp_normalized', y_train)
+        train_r2 = r2_score(y_train_restored, y_train_pred_restored)
+        train_mae = mean_absolute_error(y_train_restored, y_train_pred_restored)
+        train_rmse = np.sqrt(mean_squared_error(y_train_restored, y_train_pred_restored))
         
         # Метрики на тестовой выборке
-        test_r2 = r2_score(y_test, y_test_pred)
-        test_mae = mean_absolute_error(y_test, y_test_pred)
-        test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+        y_test_restored = analyzer.restore_column('charger_temp_normalized', y_test)
+        test_r2 = r2_score(y_test_restored, y_test_pred_restored)
+        test_mae = mean_absolute_error(y_test_restored, y_test_pred_restored)
+        test_rmse = np.sqrt(mean_squared_error(y_test_restored, y_test_pred_restored))
         
         # Сохраняем результаты
         results[model_name] = {
             'model': model,
             'train': {'r2': train_r2, 'mae': train_mae, 'rmse': train_rmse},
             'test': {'r2': test_r2, 'mae': test_mae, 'rmse': test_rmse},
-            'predictions': y_test_pred,
-            'y_true': y_test
+            'predictions': y_test_pred_restored,
+            'y_true': y_test_restored
         }
         
         # Выводим результаты
@@ -2015,11 +2017,11 @@ if __name__ == "__main__":
     print(f"Normalized charger temp: min={min(df_prepared['charger_temp_normalized'])}, max={max(df_prepared['charger_temp_normalized'])}")
     #analyze(df_prepared)
     results = pca_modeling(df_prepared)
-    #best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
-    #error_analysis = analyze_error_distribution(results['results'], best_model_name)
+    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
+    error_analysis = analyze_error_distribution(results['results'], best_model_name)
 
-    #results = clean_modeling(df_prepared)
+    results = clean_modeling(df_prepared)
 
-    #best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
-    #error_analysis = analyze_error_distribution(results['results'], best_model_name)
+    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
+    error_analysis = analyze_error_distribution(results['results'], best_model_name)
 
