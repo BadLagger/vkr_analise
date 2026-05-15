@@ -2004,24 +2004,33 @@ if __name__ == "__main__":
     import glob
     import sys
 
-    WIN_PATH="G:/Yadisk/YandexDisk/Учёба/ВКР/vkr_log/metrics_*.csv"
-    LIN_PATH="/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_*.csv"
-    files = glob.glob(LIN_PATH if sys.platform == "linux" else WIN_PATH)
-    df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    #WIN_PATH="G:/Yadisk/YandexDisk/Учёба/ВКР/vkr_log/metrics_*.csv"
+    #LIN_PATH="/home/hrechko/yadisk/Учёба/ВКР/vkr_log/metrics_*.csv"
+    #files = glob.glob(LIN_PATH if sys.platform == "linux" else WIN_PATH)
+    #df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
 
     #if sys.platform != "linux":
     #    matplotlib.use('Qt5Agg')
 
-    df_prepared = data_prepare(df)
+    #df_prepared = data_prepare(df)
 
-    print(f"Normalized charger temp: min={min(df_prepared['charger_temp_normalized'])}, max={max(df_prepared['charger_temp_normalized'])}")
+    #print(f"Normalized charger temp: min={min(df_prepared['charger_temp_normalized'])}, max={max(df_prepared['charger_temp_normalized'])}")
     #analyze(df_prepared)
-    results = pca_modeling(df_prepared)
-    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
-    error_analysis = analyze_error_distribution(results['results'], best_model_name)
+    #results = pca_modeling(df_prepared)
+    #best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
+    #error_analysis = analyze_error_distribution(results['results'], best_model_name)
 
-    results = clean_modeling(df_prepared)
+    #results = clean_modeling(df_prepared)
 
-    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
-    error_analysis = analyze_error_distribution(results['results'], best_model_name)
+    #best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
+    #error_analysis = analyze_error_distribution(results['results'], best_model_name)
+
+    from generator import DataPreparator
+
+    gen_cfg = DataPreparator()
+    gen_cfg.add('charger_current', 'charger_current_norm', 'divisor', 1000)
+    gen_cfg.add('fg_current', 'fg_current_norm', 'divisor', 1000)
+    gen_cfg.add('charger_voltage', 'charger_voltage', 'divisor', 1000000)
+    gen_cfg.add('fg_voltage', 'fg_voltage_norm', 'divisor', 1000000)
+    gen_cfg.save_to_file("prepare.json")
 
