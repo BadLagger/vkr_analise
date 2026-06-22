@@ -21,7 +21,75 @@ class DataPreparation:
     Преобразование сырых логов в структурированный датафрейм.
     Автоматическое определение типов, обработка NaN, приведение единиц измерения.
     """
-    
+
+    # Словарь правил приведения на уровне класса
+    UNIT_RULES = {
+        # Ток
+        'current': {'divisor': 1000, 'unit': 'mA_to_A', 'target_unit': 'A'},
+        'charger_current': {'divisor': 1000, 'unit': 'mA_to_A', 'target_unit': 'A'},
+        'fg_current': {'divisor': 1000, 'unit': 'mA_to_A', 'target_unit': 'A'},
+        
+        # Напряжение
+        'voltage': {'divisor': 1000000, 'unit': 'uV_to_V', 'target_unit': 'V'},
+        'charger_voltage': {'divisor': 1000000, 'unit': 'uV_to_V', 'target_unit': 'V'},
+        'fg_voltage': {'divisor': 1000000, 'unit': 'uV_to_V', 'target_unit': 'V'},
+        
+        # Температура (0.1°C -> °C)
+        'temp': {'divisor': 10, 'unit': '0.1C_to_C', 'target_unit': '°C'},
+        'charger_temp': {'divisor': 10, 'unit': '0.1C_to_C', 'target_unit': '°C'},
+        'fg_temp': {'divisor': 10, 'unit': '0.1C_to_C', 'target_unit': '°C'},
+        'mcu_temp': {'divisor': 10, 'unit': '0.1C_to_C', 'target_unit': '°C'},
+        'temp_sensor': {'divisor': 10, 'unit': '0.1C_to_C', 'target_unit': '°C'},
+        
+        # Частота (кГц -> Гц)
+        'freq': {'multiplier': 1000, 'unit': 'kHz_to_Hz', 'target_unit': 'Hz'},
+        'mcu_freq': {'multiplier': 1000, 'unit': 'kHz_to_Hz', 'target_unit': 'Hz'},
+    }
+
+    @classmethod
+    def get_normalization_rules(cls, column_names):
+        """
+        Получить словарь с правилами нормализации для указанных колонок.
+        
+        Args:
+            column_names: список имен колонок (с суффиксом _normalized или без)
+            
+        Returns:
+            dict: словарь вида {имя_колонки_без_суффикса: правило_нормализации}
+            
+        Example:
+            >>> rules = DataPreparation.get_normalization_rules(
+            ...     ['fg_current_normalized', 'fg_voltage_normalized', 'mcu_temp_normalized']
+            ... )
+            >>> print(rules)
+            {
+                'fg_current': {'divisor': 1000, 'unit': 'mA_to_A', 'target_unit': 'A'},
+                'fg_voltage': {'divisor': 1000000, 'unit': 'uV_to_V', 'target_unit': 'V'},
+                'mcu_temp': {'divisor': 10, 'unit': '0.1C_to_C', 'target_unit': '°C'}
+            }
+        """
+        rules = {}
+        
+        for col in column_names:
+            # Убираем суффикс _normalized, если он есть
+            base_col = col.replace('_normalized', '')
+            
+            # Ищем правило для базового имени колонки
+            rule = None
+            for key, rule_candidate in cls.UNIT_RULES.items():
+                if key == base_col or key in base_col:
+                    rule = rule_candidate
+                    break
+            
+            if rule:
+                rules[base_col] = rule.copy()
+            else:
+                # Если правило не найдено, сохраняем информацию, что нормализация не требуется
+                rules[base_col] = {'normalized': False, 'message': 'No normalization rule found'}
+                print(f"Предупреждение: правило не найдено для колонки '{base_col}'")
+        
+        return rules
+
     @staticmethod
     def load_logs(file_path, delimiter=',', convert_units=True):
         """
@@ -46,8 +114,8 @@ class DataPreparation:
         
         return df
     
-    @staticmethod
-    def _normalize_units(df):
+    @classmethod
+    def _normalize_units(cls, df):
         """
         Приведение различных величин к стандартным единицам:
         - ток: мкА -> А (делим на 1_000_000) или мА -> А (делим на 1000)
@@ -56,30 +124,6 @@ class DataPreparation:
         - частота: кГц -> Гц (умножаем на 1000) или МГц -> Гц
         """
         df_converted = df.copy()
-        
-        # Словарь правил приведения (на основе имени колонки)
-        unit_rules = {
-            # Ток
-            'current': {'divisor': 1000, 'unit': 'mA_to_A'},  # мА -> А
-            'charger_current': {'divisor': 1000, 'unit': 'mA_to_A'},
-            'fg_current': {'divisor': 1000, 'unit': 'mA_to_A'},
-            
-            # Напряжение
-            'voltage': {'divisor': 1000000, 'unit': 'uV_to_V'},
-            'charger_voltage': {'divisor': 1000000, 'unit': 'uV_to_V'},
-            'fg_voltage': {'divisor': 1000000, 'unit': 'uV_to_V'},
-            
-            # Температура (0.1°C -> °C)
-            'temp': {'divisor': 10, 'unit': '0.1C_to_C'},
-            'charger_temp': {'divisor': 10, 'unit': '0.1C_to_C'},
-            'fg_temp': {'divisor': 10, 'unit': '0.1C_to_C'},
-            'mcu_temp': {'divisor': 10, 'unit': '0.1C_to_C'},
-            'temp_sensor': {'divisor': 10, 'unit': '0.1C_to_C'},
-            
-            # Частота (кГц -> Гц)
-            'freq': {'multiplier': 1000, 'unit': 'kHz_to_Hz'},
-            'mcu_freq': {'multiplier': 1000, 'unit': 'kHz_to_Hz'},
-        }
         
         for col in df.columns:
             if col not in df_converted.columns:
@@ -91,7 +135,7 @@ class DataPreparation:
             
             # Ищем правило для колонки
             rule = None
-            for key, rule_candidate in unit_rules.items():
+            for key, rule_candidate in cls.UNIT_RULES.items():
                 if key in col.lower():
                     rule = rule_candidate
                     break
@@ -1983,6 +2027,254 @@ def analyze_error_distribution(results, model_name='XGBoost'):
         'large_errors': large_errors_df if large_errors_count > 0 else None
     }
 
+# Добавьте этот импорт в начало файла
+import treelite
+#import treelite_runtime
+import joblib
+import os
+from datetime import datetime
+
+# ===============================
+# Сравнение моделей и сохранение лучшей
+# ===============================
+def compare_and_save_best_model(pca_results, clean_results, df_prepared, output_dir='models'):
+    """
+    Сравнивает модели из PCA и clean моделирования, выбирает лучшую и сохраняет в формате Treelite
+    
+    Параметры:
+    -----------
+    pca_results : dict
+        Результаты из pca_modeling()
+    clean_results : dict
+        Результаты из clean_modeling()
+    df_prepared : pd.DataFrame
+        Подготовленные данные (для восстановления признаков)
+    output_dir : str
+        Директория для сохранения моделей
+    """
+    print("\n" + "="*70)
+    print("СРАВНЕНИЕ МОДЕЛЕЙ И СОХРАНЕНИЕ ЛУЧШЕЙ")
+    print("="*70)
+    
+    # Создаем директорию для моделей
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Извлекаем лучшие модели из каждого подхода
+    models_comparison = {}
+    
+    # PCA модели
+    if pca_results and 'results' in pca_results:
+        for model_name, result in pca_results['results'].items():
+            model_key = f"PCA_{model_name}"
+            models_comparison[model_key] = {
+                'model': result['model'],
+                'test_r2': result['test']['r2'],
+                'test_mae': result['test']['mae'],
+                'test_rmse': result['test']['rmse'],
+                'approach': 'PCA',
+                'features': pca_results['pca_components'],
+                'pca': pca_results.get('pca'),
+                'scaler': pca_results.get('scaler'),
+                'is_pca': True
+            }
+    
+    # Clean модели
+    if clean_results and 'results' in clean_results:
+        for model_name, result in clean_results['results'].items():
+            model_key = f"Clean_{model_name}"
+            models_comparison[model_key] = {
+                'model': result['model'],
+                'test_r2': result['test']['r2'],
+                'test_mae': result['test']['mae'],
+                'test_rmse': result['test']['rmse'],
+                'approach': 'Clean',
+                'features': clean_results.get('feature_cols', []),
+                'pca': None,
+                'scaler': None,
+                'is_pca': False
+            }
+    
+    # Создаем DataFrame для сравнения
+    comparison_df = pd.DataFrame([
+        {
+            'Model': name,
+            'Approach': info['approach'],
+            'R²': info['test_r2'],
+            'MAE': info['test_mae'],
+            'RMSE': info['test_rmse'],
+            'Features': len(info['features'])
+        }
+        for name, info in models_comparison.items()
+    ]).sort_values('R²', ascending=False)
+    
+    print("\n📊 СРАВНЕНИЕ ВСЕХ МОДЕЛЕЙ:")
+    print("="*70)
+    print(comparison_df.to_string(index=False))
+    
+    # Визуализация сравнения
+    fig, axes = plt.subplots(1, 3, figsize=(15, 6))
+    
+    # R² сравнение
+    axes[0].barh(comparison_df['Model'], comparison_df['R²'], 
+                 color=['green' if x > 0.9 else 'orange' if x > 0.7 else 'red' 
+                        for x in comparison_df['R²']])
+    axes[0].set_xlabel('R² Score')
+    axes[0].set_title('Comparison of R² Scores')
+    axes[0].axvline(x=0.9, color='green', linestyle='--', alpha=0.5, label='Excellent (0.9)')
+    axes[0].axvline(x=0.7, color='orange', linestyle='--', alpha=0.5, label='Good (0.7)')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3, axis='x')
+    
+    # MAE сравнение
+    axes[1].barh(comparison_df['Model'], comparison_df['MAE'], color='skyblue')
+    axes[1].set_xlabel('MAE (°C)')
+    axes[1].set_title('Comparison of MAE')
+    axes[1].grid(True, alpha=0.3, axis='x')
+    
+    # RMSE сравнение
+    axes[2].barh(comparison_df['Model'], comparison_df['RMSE'], color='lightcoral')
+    axes[2].set_xlabel('RMSE (°C)')
+    axes[2].set_title('Comparison of RMSE')
+    axes[2].grid(True, alpha=0.3, axis='x')
+    
+    plt.suptitle('Model Comparison: PCA vs Clean Features', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+    
+    # Выбираем лучшую модель
+    best_model_name = comparison_df.iloc[0]['Model']
+    best_model_info = models_comparison[best_model_name]
+    
+    print("\n" + "="*70)
+    print(f"🏆 ЛУЧШАЯ МОДЕЛЬ: {best_model_name}")
+    print("="*70)
+    print(f"  - Подход: {best_model_info['approach']}")
+    print(f"  - R²: {best_model_info['test_r2']:.6f}")
+    print(f"  - MAE: {best_model_info['test_mae']:.6f}")
+    print(f"  - RMSE: {best_model_info['test_rmse']:.6f}")
+    print(f"  - Количество признаков: {len(best_model_info['features'])}")
+    print(f"  - Признаки: {best_model_info['features']}")
+    
+    # Сохраняем модель в формате Treelite
+    print("\n" + "="*70)
+    print("СОХРАНЕНИЕ МОДЕЛИ В ФОРМАТЕ TREELITE")
+    print("="*70)
+    
+    best_model = best_model_info['model']
+    
+    # Проверяем, что модель поддерживает сохранение в Treelite
+    if hasattr(best_model, 'get_booster'):
+        try:
+            # Сохраняем модель в формате Treelite
+            model_name = f"temperature_predictor_{timestamp}"
+            
+            # Получаем booster из модели XGBoost
+            booster = best_model.get_booster()
+            #print("Тип бустера: %s" % type(booster))
+            # Конвертируем в Treelite модель
+            tl_model = treelite.frontend.from_xgboost(booster)
+            #print("Тип модели: %s" % type(tl_model))
+            #print(f"Доступные методы: {[m for m in dir(tl_model) if not m.startswith('_')]}")
+            # Сохраняем в файл (.so или .dll)
+            treelite_path = os.path.join(output_dir, f"{model_name}.so")
+
+            #tl_model.export_lib(
+            #    toolchain='gcc',
+            #    libpath=treelite_path,
+            #    verbose=True
+            #)
+            
+            model_bytes = tl_model.serialize_bytes()
+            with open(treelite_path, 'wb') as f:
+                f.write(model_bytes)
+            
+            print(f"✅ Модель сохранена в Treelite формате: {treelite_path}")
+            # Сохраняем метаданные модели
+            metadata = {
+                'model_name': model_name,
+                'approach': best_model_info['approach'],
+                'features': best_model_info['features'],
+                'test_r2': best_model_info['test_r2'],
+                'test_mae': best_model_info['test_mae'],
+                'test_rmse': best_model_info['test_rmse'],
+                'timestamp': timestamp,
+                'feature_count': len(best_model_info['features']),
+                'is_pca': best_model_info['is_pca']
+            }
+            
+            # Если это PCA модель, сохраняем PCA и scaler
+            if best_model_info['is_pca'] and best_model_info['pca'] is not None:
+                pca_path = os.path.join(output_dir, f"{model_name}_pca.pkl")
+                scaler_path = os.path.join(output_dir, f"{model_name}_scaler.pkl")
+                
+                joblib.dump(best_model_info['pca'], pca_path)
+                joblib.dump(best_model_info['scaler'], scaler_path)
+                
+                metadata['pca_path'] = pca_path
+                metadata['scaler_path'] = scaler_path
+                metadata['pca_components'] = best_model_info['pca'].n_components_
+                
+                print(f"✅ PCA сохранен: {pca_path}")
+                print(f"✅ Scaler сохранен: {scaler_path}")
+            
+            # Сохраняем метаданные в JSON
+            import json
+            metadata_path = os.path.join(output_dir, f"{model_name}_metadata.json")
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
+            
+            print(f"✅ Метаданные сохранены: {metadata_path}")
+            
+            # Создаем пример использования на Go
+            #create_go_example(output_dir, model_name, metadata)
+            
+            # Сохраняем также стандартным способом (на всякий случай)
+            joblib_path = os.path.join(output_dir, f"{model_name}_model.pkl")
+            joblib.dump(best_model, joblib_path)
+            print(f"✅ Модель сохранена в pickle: {joblib_path}")
+
+            # Сохранение параметров нормализации
+            normalization_prms = DataPreparation.get_normalization_rules(best_model_info['features'])
+            normalization_prms_path=os.path.join(output_dir, f"{model_name}_normalization.json")
+            with open(normalization_prms_path, 'w') as f:
+                json.dump(normalization_prms, f, indent=2)
+            print(f"✅ Параметры нормализации сохранены: {normalization_prms_path}")
+            
+            # Возвращаем информацию о сохраненной модели
+            saved_info = {
+                'model_name': model_name,
+                'treelite_path': treelite_path,
+                'metadata_path': metadata_path,
+                'joblib_path': joblib_path,
+                'metadata': metadata,
+                'model': best_model
+            }
+            
+            return saved_info
+            
+        except Exception as e:
+            print(f"❌ Ошибка при сохранении в Treelite: {e}")
+            print("   Сохраняем модель в стандартном формате...")
+            
+            # Fallback: сохраняем в pickle
+            joblib_path = os.path.join(output_dir, f"best_model_{timestamp}.pkl")
+            joblib.dump(best_model, joblib_path)
+            print(f"✅ Модель сохранена в pickle: {joblib_path}")
+            
+            return {'joblib_path': joblib_path, 'model': best_model}
+    else:
+        print("⚠️  Модель не поддерживает сохранение в Treelite (не XGBoost)")
+        print("   Сохраняем в стандартном формате pickle...")
+        
+        joblib_path = os.path.join(output_dir, f"best_model_{timestamp}.pkl")
+        joblib.dump(best_model, joblib_path)
+        print(f"✅ Модель сохранена в pickle: {joblib_path}")
+        
+        return {'joblib_path': joblib_path, 'model': best_model}
+
+
+
 # ===============================
 # Пример использования с реальными данными
 # ===============================
@@ -2016,12 +2308,13 @@ if __name__ == "__main__":
 
     print(f"Normalized charger temp: min={min(df_prepared['charger_temp_normalized'])}, max={max(df_prepared['charger_temp_normalized'])}")
     #analyze(df_prepared)
-    results = pca_modeling(df_prepared)
-    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
-    error_analysis = analyze_error_distribution(results['results'], best_model_name)
+    results_pca = pca_modeling(df_prepared)
+    best_model_name = max(results_pca['results'], key=lambda x: results_pca['results'][x]['test']['r2'])
+    error_analysis = analyze_error_distribution(results_pca['results'], best_model_name)
 
-    results = clean_modeling(df_prepared)
+    results_clean = clean_modeling(df_prepared)
 
-    best_model_name = max(results['results'], key=lambda x: results['results'][x]['test']['r2'])
-    error_analysis = analyze_error_distribution(results['results'], best_model_name)
+    best_model_name = max(results_clean['results'], key=lambda x: results_clean['results'][x]['test']['r2'])
+    error_analysis = analyze_error_distribution(results_clean['results'], best_model_name)
 
+    result = compare_and_save_best_model(results_pca, results_clean, df_prepared)
